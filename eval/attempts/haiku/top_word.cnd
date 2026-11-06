@@ -1,0 +1,52 @@
+fn topword_words(text: Str) -> [Str]
+  var words: [Str] = []
+  var start = 0
+  var i = 0
+  let n = len(text)
+  while i < n do
+    if byte_at(text, i) == 32 then
+      if i > start then
+        push(words, slice(text, start, i))
+      end if
+      start = i + 1
+    end if
+    i = i + 1
+  end while
+  if n > start then
+    push(words, slice(text, start, n))
+  end if
+  return words
+end fn topword_words
+
+fn top_word(text: Str) -> Str
+  let words = topword_words(text)
+  var uniq: [Str] = []
+  var counts: [Int] = []
+  for w in words do
+    var idx = -1
+    var j = 0
+    while j < len(uniq) do
+      if uniq[j] == w then
+        idx = j
+      end if
+      j = j + 1
+    end while
+    if idx < 0 then
+      push(uniq, w)
+      push(counts, 1)
+    else
+      counts[idx] = counts[idx] + 1
+    end if
+  end for
+  var best = ""
+  var best_count = 0
+  var k = 0
+  while k < len(uniq) do
+    if counts[k] > best_count then
+      best_count = counts[k]
+      best = uniq[k]
+    end if
+    k = k + 1
+  end while
+  return best
+end fn top_word

@@ -1,0 +1,3 @@
+count=4 sum=13 max=9
+count=1 sum=-5 max=-5
+count=3 sum=6 max=3

@@ -26,7 +26,7 @@ type Lexer = record
 end type Lexer
 
 fn keyword_list() -> [Str]
-  return ["fn", "end", "let", "var", "if", "then", "else", "while", "do", "for", "in", "return", "break", "continue", "match", "case", "type", "record", "enum", "requires", "ensures", "example", "effects", "and", "or", "not", "true", "false", "inout", "use"]
+  return ["fn", "end", "let", "var", "if", "then", "else", "while", "do", "for", "in", "return", "break", "continue", "match", "case", "type", "record", "enum", "requires", "ensures", "example", "effects", "and", "or", "not", "true", "false", "inout", "use", "distinct"]
 end fn keyword_list
 
 # Tokens after which a newline does not end the statement.

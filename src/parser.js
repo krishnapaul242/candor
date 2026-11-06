@@ -119,7 +119,12 @@ export function parse(src) {
       closeBlock('type', kw, name);
       return { kind: 'enum', name, variants, line: kw.line, col: kw.col };
     }
-    fail(`expected 'record' or 'enum' after 'type ${name} ='`);
+    if (atKw('distinct')) {
+      next();
+      const base = parseType();
+      return { kind: 'distinct', name, base, line: kw.line, col: kw.col };
+    }
+    fail(`expected 'record', 'enum' or 'distinct' after 'type ${name} ='`);
   }
 
   function parseFn() {

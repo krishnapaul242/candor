@@ -1,0 +1,35 @@
+type Instr = enum
+  Push(value: Int)
+  Add
+  Mul
+  Dup
+  Swap
+end type Instr
+
+fn run(prog: [Instr]) -> Int
+  var stack: [Int] = []
+  for ins in prog do
+    match ins
+      case Push(v)
+        push(stack, v)
+      case Add
+        let b = pop(stack)
+        let a = pop(stack)
+        push(stack, a + b)
+      case Mul
+        let b = pop(stack)
+        let a = pop(stack)
+        push(stack, a * b)
+      case Dup
+        let t = pop(stack)
+        push(stack, t)
+        push(stack, t)
+      case Swap
+        let b = pop(stack)
+        let a = pop(stack)
+        push(stack, b)
+        push(stack, a)
+    end match
+  end for
+  return stack[len(stack) - 1]
+end fn run

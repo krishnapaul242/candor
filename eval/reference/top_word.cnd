@@ -1,0 +1,39 @@
+fn top_word(text: Str) -> Str
+  var words: [Str] = []
+  var counts: [Int] = []
+  var start = -1
+  for i in 0 ..= len(text) do
+    let at_end = i == len(text)
+    var is_space = true
+    if not at_end then
+      is_space = byte_at(text, i) == 32
+    end if
+    if not is_space and start < 0 then
+      start = i
+    end if
+    if is_space and start >= 0 then
+      let w = slice(text, start, i)
+      start = -1
+      var found = false
+      for k in 0 ..< len(words) do
+        if words[k] == w then
+          counts[k] = counts[k] + 1
+          found = true
+        end if
+      end for
+      if not found then
+        push(words, w)
+        push(counts, 1)
+      end if
+    end if
+  end for
+  var best = ""
+  var best_n = 0
+  for j in 0 ..< len(words) do
+    if counts[j] > best_n then
+      best_n = counts[j]
+      best = words[j]
+    end if
+  end for
+  return best
+end fn top_word

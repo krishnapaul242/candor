@@ -15,13 +15,15 @@
     <a href="guide.html" aria-current="page">Language guide</a>
     <a href="selfhosting.html">Self-hosting</a>
     <a href="roadmap.html">Roadmap</a>
+    <a href="eval.html">Evaluation</a>
+    <a href="llms.txt">llms.txt</a>
     <a class="gh" href="https://github.com/krishnapaul242/candor">GitHub</a>
   </nav>
 </div></header>
 
 <main><div class="prose">
   <h1>Language guide</h1>
-  <p class="lede">The whole language, in the order you'll need it. Every example on this page is valid Candor.</p>
+  <p class="lede">The whole language, in the order you'll need it. Every example on this page is valid Candor. If you're a model, or briefing one, <a href="llms.txt"><code>llms.txt</code></a> has the same content in a denser form.</p>
 
   <ol class="toc">
     <li><a href="#files">Files, lines and blocks</a></li>
@@ -35,6 +37,7 @@
     <li><a href="#holes">Typed holes</a></li>
     <li><a href="#records">Records</a></li>
     <li><a href="#enums">Enums and match</a></li>
+    <li><a href="#distinct">Distinct types</a></li>
     <li><a href="#values">Value semantics</a></li>
     <li><a href="#inout">inout and borrowing</a></li>
     <li><a href="#builtins">Built-ins</a></li>
@@ -216,6 +219,24 @@ end fn sum</code></pre>
     <li>Enums whose variants carry no data support <code>==</code>, <code>!=</code> and <code>show</code>, which prints the variant name. Use them for kinds and states: <code>if light == Red then</code>.</li>
     <li>Payload fields are read only through <code>match</code>.</li>
   </ul>
+
+  <h2 id="distinct">Distinct types</h2>
+<pre><code class="cnd">type UserId = distinct Int
+type OrderId = distinct Int
+
+fn next_user(id: UserId) -> UserId
+  return UserId(id.value + 1)
+end fn next_user</code></pre>
+  <ul>
+    <li>A distinct type has its base's representation but is a separate type. A <code>UserId</code> is never accepted where an <code>Int</code> or an <code>OrderId</code> is expected.</li>
+    <li>Wrap with <code>UserId(5)</code>, unwrap with <code>id.value</code> (read-only).</li>
+    <li>You can use <code>==</code>, <code>!=</code> and <code>show</code>, and ordering when the base is numeric. A distinct Int can index arrays: <code>names[id]</code>.</li>
+    <li>Arithmetic is not allowed, since adding two ids is almost always a bug. When you do mean it, unwrap and rewrap: <code>UserId(id.value + 1)</code>.</li>
+    <li>The base must be Int, Float, Str or Bool.</li>
+  </ul>
+<pre><code>error[type-mismatch] app.cnd:16:18
+  argument 'id' of lookup has type Int, expected UserId
+  hint: wrap it: UserId(...)</code></pre>
 
   <h2 id="values">Value semantics</h2>
   <p>Assigning never creates a hidden alias:</p>

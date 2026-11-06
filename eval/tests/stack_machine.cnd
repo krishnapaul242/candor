@@ -1,0 +1,10 @@
+use "@SOL@"
+
+fn main()
+  effects io
+  print(show(run([Push(2), Push(3), Add, Push(4), Mul])))
+  print(show(run([Push(7)])))
+  print(show(run([Push(5), Dup, Mul])))
+  print(show(run([Push(1), Push(2), Swap])))
+  print(show(run([Push(10), Push(3), Swap, Push(4), Add, Mul])))
+end fn main

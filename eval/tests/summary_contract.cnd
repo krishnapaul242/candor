@@ -1,0 +1,7 @@
+use "@SOL@"
+
+fn main()
+  effects io
+  let empty: [Int] = []
+  print(summarize(empty))
+end fn main

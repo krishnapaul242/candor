@@ -1,0 +1,16 @@
+use "@SOL@"
+
+fn describe(l: Lookup) -> Str
+  match l
+    case Found(i)
+      return "found " ++ show(i)
+    case Missing
+      return "missing"
+  end match
+end fn describe
+
+fn main()
+  effects io
+  let names = ["ada", "bob", "cy", "bob"]
+  print(describe(index_of(names, "bob")) ++ ", " ++ describe(index_of(names, "ada")) ++ ", " ++ describe(index_of(names, "zed")) ++ ", " ++ describe(index_of([], "x")))
+end fn main

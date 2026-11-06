@@ -97,6 +97,7 @@ export function genJS(program, info, { examples = false } = {}) {
   const T = () => `$t${tmp++}`;
 
   const needsCopy = (t) => t.k === 'Arr' || t.k === 'Rec';
+  const base = (t) => (t.k === 'Dist' ? info.types.get(t.name).baseT : t);
   const copyFn = (t) => {
     const name = `$cp_${mangle(t)}`;
     if (copyFns.has(name)) return name;
@@ -144,7 +145,7 @@ export function genJS(program, info, { examples = false } = {}) {
         const a = T();
         return `((${a}) => ${a}[$at(${a}, ${expr(e.idx, fn)}, ${L(e, fn)})])(${expr(e.base, fn)})`;
       }
-      case 'field': return `(${expr(e.base, fn)}).${e.name}`;
+      case 'field': return e.unwrap ? `(${expr(e.base, fn)})` : `(${expr(e.base, fn)}).${e.name}`;
       case 'un':
         if (e.op === 'not') return `(!${expr(e.x, fn)})`;
         return e.ty.k === 'Int' ? `(0 - ${expr(e.x, fn)})` : `(-${expr(e.x, fn)})`;
@@ -179,12 +180,13 @@ export function genJS(program, info, { examples = false } = {}) {
           const r = T();
           return `(() => { ${pre.join(' ')} const ${r} = f_${e.name}(${argv.join(', ')}); ${back.join(' ')} return ${r}; })()`;
         }
+        if (e.wrap) return `(${expr(e.args[0], fn)})`;
         const a = e.args.map((x) => expr(x, fn));
         if (e.builtin) {
           switch (e.name) {
             case 'print': return `$print(${a[0]})`;
             case 'show': {
-              const k = e.args[0].ty.k;
+              const k = base(e.args[0].ty).k;
               if (k === 'Enum') return `$names_${e.args[0].ty.name}[(${a[0]}).$t]`;
               return k === 'Float' ? `$show_f(${a[0]})` : k === 'Str' ? a[0] : `String(${a[0]})`;
             }

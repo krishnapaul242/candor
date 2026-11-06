@@ -64,4 +64,18 @@ Both compilers implement the change, there are run and error tests for each new 
 
 **New pain point, measured:** the loader parses each module into a shared AST arena. Getting that arena into the parser state and back out again copies it, because Candor can't *move* a value. Peak memory for a self-compile went from 36 MB to 54 MB. Copy-on-write (v0.6) would make this free. A cheaper stopgap would be letting `inout` reach into the parser, so the arena is never handed over at all.
 
+## Update: distinct types (v0.4)
+
+**Language change:** `type NodeId = distinct Int`. Wrap with `NodeId(5)`, unwrap with `.value` (read-only), and no arithmetic. A distinct Int can index arrays.
+
+**In candorc:** AST node indices are now `NodeId` and interned type indices are `TyId`, including in `Node.ty`, `Node.ref`, `Ast.kids`, `Ty.el` and every checker and codegen signature. `StrMap` stores plain Ints, so typed lookups (`type_decl`, `variant_decl`, `fn_decl`) convert at that one boundary.
+
+**What the checker did:** after the scripted retyping, it reported 212 places where an `Int` met an id. Two were bugs in *my scripts*, not in candorc:
+- a rule that typed every parameter named `b` as a type id, which hit `octal3(b)`;
+- a rule that rewrote `prev >= 0` to `prev != NO_NODE` in `declare`, where `prev` is a scope index. That one would have silently broken shadowing detection.
+
+With plain `Int`s, both would have compiled. After the fixes: all 40 checks passed, a new fixed point, and swapping a `TyId` for a `NodeId` is now `argument 'n' of err has type TyId, expected NodeId`.
+
+**Exhaustive `match` paid off as predicted:** adding `YDist` to `TyKind` made the compiler name `ty_str` and `ctype` as missing a case. `mangle` wasn't flagged because it ends in `case _`, a reminder that a wildcard case quietly hides new variants.
+
 Each change goes into both compilers. The self-hosting test guarantees they stay in agreement, so the language can now evolve using itself.

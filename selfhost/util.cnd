@@ -57,6 +57,7 @@ type NodeKind = enum
   NFn
   NProgram
   NConst
+  NDistinct
 end type NodeKind
 
 # how a name was bound
@@ -75,6 +76,8 @@ type RefKind = enum
   RVariant
   RBuiltin
   RFn
+  RWrap
+  RUnwrap
 end type RefKind
 
 # how an expression is used (drives copying)
@@ -94,7 +97,15 @@ type TyKind = enum
   YArr
   YRec
   YEnum
+  YDist
 end type TyKind
+
+# ids: an AST node index and an interned type index must never be mixed up
+type NodeId = distinct Int
+type TyId = distinct Int
+
+let NO_NODE: NodeId = NodeId(-1)
+let NO_TY: TyId = TyId(-1)
 
 # ---------- small helpers ----------
 

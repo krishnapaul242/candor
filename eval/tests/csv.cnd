@@ -1,0 +1,17 @@
+use "@SOL@"
+
+fn show_list(xs: [Int]) -> Str
+  var parts: [Str] = []
+  for x in xs do
+    push(parts, show(x))
+  end for
+  return "[" ++ join(parts, ",") ++ "]"
+end fn show_list
+
+fn main()
+  effects io
+  print(show_list(parse_csv_ints("12,-3,40")))
+  print(show_list(parse_csv_ints("")))
+  print(show_list(parse_csv_ints("7")))
+  print(show_list(parse_csv_ints("-100,0,2024,-1")))
+end fn main

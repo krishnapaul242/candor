@@ -4,7 +4,7 @@
 export const KEYWORDS = new Set([
   'fn', 'end', 'let', 'var', 'if', 'then', 'else', 'while', 'do', 'for', 'in',
   'return', 'break', 'continue', 'match', 'case', 'type', 'record', 'enum',
-  'requires', 'ensures', 'example', 'effects', 'and', 'or', 'not', 'true', 'false', 'inout', 'use',
+  'requires', 'ensures', 'example', 'effects', 'and', 'or', 'not', 'true', 'false', 'inout', 'use', 'distinct',
 ]);
 
 const OPS3 = ['..<', '..='];

@@ -1,0 +1,17 @@
+fn fizzbuzz(n: Int) -> [Str]
+  var res: [Str] = []
+  var i = 1
+  while i <= n do
+    if i % 15 == 0 then
+      push(res, "FizzBuzz")
+    else if i % 3 == 0 then
+      push(res, "Fizz")
+    else if i % 5 == 0 then
+      push(res, "Buzz")
+    else
+      push(res, show(i))
+    end if
+    i = i + 1
+  end while
+  return res
+end fn fizzbuzz

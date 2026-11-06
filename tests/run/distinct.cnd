@@ -1,0 +1,34 @@
+type UserId = distinct Int
+type Email = distinct Str
+type Meters = distinct Float
+
+type User = record
+  id: UserId
+  email: Email
+end type User
+
+fn find_user(users: [User], id: UserId) -> Int
+  for i in 0 ..< len(users) do
+    if users[i].id == id then
+      return i
+    end if
+  end for
+  return -1
+end fn find_user
+
+fn next_id(id: UserId) -> UserId
+  example next_id(UserId(4)) == UserId(5)
+  return UserId(id.value + 1)
+end fn next_id
+
+fn main()
+  effects io
+  let users = [User { id: UserId(7), email: Email("a@x.io") }, User { id: UserId(9), email: Email("b@x.io") }]
+  let names = ["zero", "one", "two"]
+  let slot = UserId(2)
+  print(show(find_user(users, UserId(9))) ++ " " ++ show(find_user(users, UserId(8))))
+  print(show(users[1].id) ++ " " ++ show(users[0].email) ++ " " ++ names[slot])
+  print(show(next_id(UserId(41))) ++ " " ++ show(UserId(3) < UserId(4)) ++ " " ++ show(Email("q") == Email("q")))
+  let d = Meters(2.5)
+  print(show(d) ++ " " ++ show(d.value * 2.0) ++ " " ++ show(len(users[0].email.value)))
+end fn main

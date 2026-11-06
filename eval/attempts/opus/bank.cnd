@@ -1,0 +1,17 @@
+type Account = record
+  owner: Str
+  balance: Int
+end type Account
+
+fn deposit(inout acc: Account, amount: Int)
+  requires amount > 0
+  acc.balance = acc.balance + amount
+end fn deposit
+
+fn withdraw(inout acc: Account, amount: Int) -> Bool
+  if amount > 0 and amount <= acc.balance then
+    acc.balance = acc.balance - amount
+    return true
+  end if
+  return false
+end fn withdraw

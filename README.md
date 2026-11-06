@@ -1,6 +1,8 @@
 # Candor
 
-A programming language designed by a language model, for a language model (and the humans who review its code).
+A programming language designed by a language model, for language models. Its users are models: the rules are built so a model writes correct code from a single spec, the compiler tells it exactly what to fix, and the human reviewing the result can trust what they read.
+
+**For models:** [`docs/llms.txt`](docs/llms.txt) is the complete language in one context-window-sized file. Every complete program in it is type-checked by `tests/spec.sh`. In the [first evaluation](eval/README.md), two models that had only read this file solved 9/9 tasks on the first attempt.
 
 **Docs:** [krishnapaul.in/candor](https://krishnapaul.in/candor/), with a [language guide](https://krishnapaul.in/candor/guide.html), [self-hosting](https://krishnapaul.in/candor/selfhosting.html) and the [roadmap](https://krishnapaul.in/candor/roadmap.html) ([`ROADMAP.md`](ROADMAP.md)).
 
@@ -17,6 +19,7 @@ Current languages are tuned so humans can **write** code quickly. Candor is tune
 | Aliasing bugs | Value semantics: `let b = a` then `push(a, 4)` never changes `b`. |
 | Mutation at a distance | A function can only change a caller's variable through an `inout` parameter, and the **call site** must say `inout` too. |
 | Off-by-one ranges | Explicit `0 ..< n` (exclusive) vs `1 ..= n` (inclusive). |
+| Mixing up ids and plain numbers | `type UserId = distinct Int`. An `OrderId` where a `UserId` belongs is a compile error, and the hint gives the fix (`wrap it: UserId(...)`). |
 | Name confusion | No shadowing, globally unique enum variants, "did you mean" suggestions, `--json` diagnostics. |
 
 ## Usage
@@ -28,6 +31,8 @@ node src/cli.js run   examples/tour.cnd --native # build with clang -O2 and run
 node src/cli.js test  examples/tour.cnd          # run every `example` clause
 node src/cli.js build examples/tour.cnd -o tour  # native binary (refuses if holes remain)
 tests/difftest.sh                                # both backends must agree byte-for-byte
+tests/spec.sh                                    # every program in docs/llms.txt must type-check
+eval/score.sh eval/attempts/opus                 # score model-written solutions
 ```
 
 Requires Node ≥ 18 and a C compiler (`cc`). No dependencies.
@@ -70,6 +75,8 @@ end type Point               end type Shape
 **Built-ins:** `print(Str)` [io], `eprint(Str)` [io], `show(Int|Float|Bool|Str|payload-free enum)` (an enum shows its variant name), `len([T]|Str)` (bytes), `push(var_array, x)`, `pop(var_array)` (removes and returns the last element; traps if empty), `array(n, fill)`, `to_float`, `to_int` (truncates; traps on out of range), `sqrt`, `assert(Bool)`, `byte_at(s, i)`, `slice(s, a, b)` (byte offsets), `from_byte(n)`, `join(parts, sep)`, `parse_float(s)`, `args()` [io], `exit(code)` [io], `read_file(path)` [fs], `write_file(path, text)` [fs], `file_exists(path)` [fs], `clock_ms()` [time].
 
 **Effects:** `io`, `fs`, `time`. Calling something with an effect requires declaring it.
+
+**Distinct types:** `type UserId = distinct Int`. Wrap with `UserId(5)`, unwrap with `id.value` (read-only). Allowed: `==`, `!=`, `show`, ordering on numeric bases, and indexing arrays with a distinct Int. Arithmetic is not allowed (unwrap and rewrap instead). The base must be Int, Float, Str or Bool.
 
 **Modules:** `use "path.cnd"` at top level, with the path relative to the file containing it. Each file loads once, and cycles are allowed. Names stay globally unique across the program, and a file can only *name* things declared in itself or in a file it directly `use`s (a `not-imported` error gives the `use` to add). Diagnostics, holes and traps name the real file.
 

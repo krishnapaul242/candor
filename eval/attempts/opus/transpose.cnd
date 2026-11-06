@@ -1,0 +1,17 @@
+fn transpose(m: [[Int]]) -> [[Int]]
+  example transpose([[1, 2, 3], [4, 5, 6]])[2][1] == 6
+  var out: [[Int]] = []
+  let rows = len(m)
+  if rows == 0 then
+    return out
+  end if
+  let cols = len(m[0])
+  for j in 0 ..< cols do
+    var row: [Int] = []
+    for i in 0 ..< rows do
+      push(row, m[i][j])
+    end for
+    push(out, row)
+  end for
+  return out
+end fn transpose

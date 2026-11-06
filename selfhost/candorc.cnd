@@ -14,7 +14,7 @@ type Loader = record
   paths: [Str]
   srcs: [Str]
   uses: [[Int]]
-  decls: [[Int]]
+  decls: [[NodeId]]
   order: [Int]
   ast: Ast
   diags: [Diag]
@@ -64,8 +64,8 @@ fn load_file(inout ld: Loader, path0: Str, from: Int, orig: Str, line: Int, col:
     push(ld.order, id)
     return id
   end if
-  let prog = len(ld.ast.nodes) - 1
-  var ds: [Int] = []
+  let prog = NodeId(len(ld.ast.nodes) - 1)
+  var ds: [NodeId] = []
   for k in 0 ..< nkids(ld.ast, prog) do
     push(ds, kid(ld.ast, prog, k))
   end for
@@ -150,7 +150,7 @@ fn main()
     report_and_exit(ld.diags, ld)
     return
   end if
-  var all: [Int] = []
+  var all: [NodeId] = []
   for id in ld.order do
     for d in ld.decls[id] do
       push(all, d)

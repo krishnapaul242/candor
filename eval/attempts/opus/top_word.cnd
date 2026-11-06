@@ -1,0 +1,56 @@
+fn top_word_split(text: Str) -> [Str]
+  var words: [Str] = []
+  var start = -1
+  let n = len(text)
+  for i in 0 ..< n do
+    if byte_at(text, i) == 32 then
+      if start >= 0 then
+        push(words, slice(text, start, i))
+        start = -1
+      end if
+    else
+      if start < 0 then
+        start = i
+      end if
+    end if
+  end for
+  if start >= 0 then
+    push(words, slice(text, start, n))
+  end if
+  return words
+end fn top_word_split
+
+fn top_word_index(items: [Str], target: Str) -> Int
+  for k in 0 ..< len(items) do
+    if items[k] == target then
+      return k
+    end if
+  end for
+  return -1
+end fn top_word_index
+
+fn top_word(text: Str) -> Str
+  example top_word("  b a b a ") == "b"
+  example top_word("   ") == ""
+  let words = top_word_split(text)
+  var uniq: [Str] = []
+  var counts: [Int] = []
+  for w in words do
+    let idx = top_word_index(uniq, w)
+    if idx < 0 then
+      push(uniq, w)
+      push(counts, 1)
+    else
+      counts[idx] = counts[idx] + 1
+    end if
+  end for
+  var best = ""
+  var best_count = 0
+  for j in 0 ..< len(uniq) do
+    if counts[j] > best_count then
+      best = uniq[j]
+      best_count = counts[j]
+    end if
+  end for
+  return best
+end fn top_word

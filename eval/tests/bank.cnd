@@ -1,0 +1,12 @@
+use "@SOL@"
+
+fn main()
+  effects io
+  var a = Account { owner: "ann", balance: 10 }
+  deposit(inout a, 5)
+  let ok1 = withdraw(inout a, 12)
+  let ok2 = withdraw(inout a, 4)
+  let ok3 = withdraw(inout a, 0)
+  let ok4 = withdraw(inout a, -2)
+  print(show(ok1) ++ " " ++ show(ok2) ++ " " ++ show(ok3) ++ " " ++ show(ok4) ++ " " ++ show(a.balance) ++ " " ++ a.owner)
+end fn main

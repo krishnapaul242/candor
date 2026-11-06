@@ -1,0 +1,387 @@
+# Candor — complete reference for language models
+
+Candor is a small, statically typed, self-hosting language. It was designed for code that models write and humans review. The compiler is strict, and every error has a stable code, a position and usually a concrete fix. This file is the whole language. Read it entirely before writing code.
+
+## 1. Program shape
+
+- Files end in `.cnd`. Top level holds only: `use "file.cnd"`, `type ... end type Name`, `fn ... end fn name`, and constants `let NAME: Type = expr`.
+- One statement per line. A newline ends a statement, except inside ( ) [ ] { } or after a binary operator or comma. There are no semicolons and no braces for blocks.
+- Comments start with `#`.
+- Every block ends with a LABELED end: `end fn NAME`, `end type NAME`, `end if`, `end while`, `end for`, `end match`.
+- Program entry: `fn main()` with no parameters and no return type. If it prints, it must declare `effects io`.
+
+```
+fn main()
+  effects io
+  print("hello")
+end fn main
+```
+
+## 2. Types
+
+| type | notes |
+|---|---|
+| `Int` | integer, range ±9007199254740991. Overflow TRAPS (no wrapping). `/` truncates toward 0. `%` is the remainder. |
+| `Float` | 64-bit IEEE. Literals need a dot or exponent: `1.0`, `2.5e3`. `1` is an Int, never a Float. |
+| `Bool` | `true` / `false`. Nothing else is truthy. |
+| `Str` | immutable UTF-8 bytes. `len` counts bytes. |
+| `Unit` | what a function without `-> T` returns. Variables, fields and arrays can't have type Unit. |
+| `[T]` | growable array, e.g. `[Int]`, `[[Str]]`. |
+| records / enums | declared with `type` (sections 8 and 9). |
+
+NO implicit conversions: `1 + 2.0` is an error. Use `to_float(i)` and `to_int(f)` (truncates). Use `show(x)` to turn Int/Float/Bool into Str.
+
+**Distinct types.** Give every kind of id or unit its own type, so they can't be mixed up:
+
+```
+type UserId = distinct Int
+type OrderId = distinct Int
+
+fn next_user(id: UserId) -> UserId
+  return UserId(id.value + 1)
+end fn next_user
+```
+
+- Wrap with `UserId(5)`; unwrap with `id.value`, which is read-only.
+- A `UserId` is never accepted where an `Int` or an `OrderId` is expected (error `type-mismatch`, with the hint `wrap it: UserId(...)` or `unwrap it with .value`).
+- Allowed: `==`, `!=`, `show`; `< <= > >=` when the base is Int or Float. A distinct Int can index arrays directly: `names[id]`.
+- NOT allowed: arithmetic (`id + 1`). Unwrap and rewrap: `UserId(id.value + 1)`.
+- The base must be Int, Float, Str or Bool.
+
+## 3. Bindings
+
+```
+let x = 5               # immutable, type inferred
+let y: Float = 2.0      # annotation optional (required for empty [] and holes)
+var count = 0           # mutable
+count = count + 1       # assignment; there is no +=, ++, -- or i++
+var xs: [Int] = []
+let _ = some_fn()       # discard a non-Unit result explicitly
+```
+
+- NO SHADOWING. A name can't be declared again while it's visible: not over a parameter, a constant, or an outer local. Two sibling blocks may reuse a name.
+- Calling a non-Unit function as a statement without using the result is an error; write `let _ = f()`.
+- Top-level constants: `let LIMIT: Int = 100`. The type is required. Initializers may use literals, operators, earlier constants and pure built-ins, but not function calls. Constants are immutable.
+
+## 4. Operators
+
+- Arithmetic `+ - * / %` need both sides to have the SAME type (Int with Int, Float with Float). `%` is Int only.
+- Strings join with `++` (not `+`): `"n = " ++ show(n)`. There is no string interpolation.
+- Comparison: `== !=` on Int, Float, Bool, Str and payload-free enums. `< <= > >=` on Int and Float only. Comparisons don't chain: write `a < b and b < c`.
+- Logic: `and`, `or`, `not` (NOT `&&`, `||`, `!`).
+- Unary minus: `-x`.
+- Precedence, low to high: `or` < `and` < `not` < comparison < `+ - ++` < `* / %` < unary `-` < postfix (`a[i]`, `r.f`, calls).
+
+## 5. Control flow
+
+```
+if x < 0 then
+  print("neg")
+else if x == 0 then
+  print("zero")
+else
+  print("pos")
+end if
+
+while n > 1 do
+  n = n / 2
+end while
+
+for i in 0 ..< n do      # i = 0, 1, ..., n-1  (exclusive)
+  print(show(i))
+end for
+
+for i in 1 ..= n do      # i = 1, ..., n  (inclusive)
+  print(show(i))
+end for
+
+for x in xs do           # each element of an array
+  print(show(x))
+end for
+```
+
+- `if` needs `then`; `while` and `for` need `do`. `break` and `continue` work in loops.
+- There is no `for i in range(...)`, no C-style `for`, and no stepping range. Use `while` for anything else.
+- The loop variable can't be assigned.
+
+## 6. Functions
+
+```
+fn hypot(a: Float, b: Float) -> Float
+  return sqrt(a * a + b * b)
+end fn hypot
+```
+
+- Every parameter has a type. Omit `-> T` for Unit. A non-Unit function must `return` on every path; the checker verifies this.
+- Parameters are immutable. To change a copy: `var a2 = a`.
+- Functions are called only by name: there are no lambdas, no function values, and no methods (`xs.len()` is wrong; write `len(xs)`).
+- Optional header clauses, in any order, between the signature line and the body:
+  - `requires COND`: checked on entry.
+  - `ensures COND`: checked on exit; `result` is the return value.
+  - `example EXPR`: a test (Bool) run by `candor test`.
+  - `effects io, fs, time`: see section 7.
+
+```
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+  requires lo <= hi
+  ensures lo <= result and result <= hi
+  example clamp(15, 0, 10) == 10
+  if x < lo then
+    return lo
+  end if
+  if x > hi then
+    return hi
+  end if
+  return x
+end fn clamp
+```
+
+Contract and example expressions must be pure (no effects).
+
+## 7. Effects
+
+A function that touches the outside world must declare it, and so must every function that calls it, all the way up to `main`.
+
+| effect | built-ins |
+|---|---|
+| `io` | `print`, `eprint`, `args`, `exit` |
+| `fs` | `read_file`, `write_file`, `file_exists` |
+| `time` | `clock_ms` |
+
+Write `effects io` on its own line in the header. A function with no `effects` line is pure.
+
+## 8. Records
+
+```
+type Point = record
+  x: Float
+  y: Float
+end type Point
+
+fn moved(p: Point) -> Point
+  var q = p                         # a copy; p is unchanged
+  q.x = q.x + 1.0                   # field assignment needs a var
+  return q
+end fn moved
+
+fn origin() -> Point
+  return Point { x: 0.0, y: 0.0 }   # every field, by name
+end fn origin
+```
+
+Records are values (see section 11). A record can't contain itself; use an enum or an array.
+
+## 9. Enums and match
+
+```
+type Shape = enum
+  Circle(radius: Float)
+  Rect(w: Float, h: Float)
+  Empty
+end type Shape
+
+fn area(s: Shape) -> Float
+  match s
+    case Circle(r)
+      return 3.14159 * r * r
+    case Rect(w, h)
+      return w * h
+    case Empty
+      return 0.0
+  end match
+end fn area
+```
+
+- Construct with `Circle(2.0)`, `Rect(1.0, 2.0)`, `Empty` (positional; no `Shape.` prefix).
+- Variant names are GLOBAL: two enums can't share a variant name, and a variant can't share a name with a function.
+- `match` must cover every variant, or end with `case _`. Patterns bind payload fields by position: `case Rect(w, _)`. There are no guards, no nested patterns and no literal patterns.
+- Payloads can be read ONLY through `match` (`s.radius` is wrong).
+- Payload-free enums (every variant has no data) support `==`, `!=` and `show(x)`, which gives the variant name.
+- Enums can be recursive: `Cons(head: Int, tail: List)`.
+
+## 10. Arrays and strings
+
+```
+var xs: [Int] = []
+push(xs, 3)              # xs must be a var (or a var's field or element)
+let last = pop(xs)       # removes and returns the last element; traps if empty
+let n = len(xs)
+xs[0] = 7                # index must be in bounds, or it traps
+let grid = array(3, array(4, 0))   # 3x4 of zeros; rows are independent
+let s = "hello"
+let b = byte_at(s, 0)    # Int byte value, 104
+let sub = slice(s, 1, 3) # bytes [1, 3) = "el"
+let joined = join(["a", "b"], ", ")
+```
+
+There are no negative indexes, no slicing syntax (`xs[1:3]` is wrong) and no `in` operator.
+
+## 11. Value semantics, borrowing, inout
+
+- Assignment copies: after `var a = [1]`, `let b = a`, `push(a, 2)`, `b` still has 1 element. Nothing is ever aliased.
+- Passing an argument costs nothing (it's borrowed): callees can't modify parameters.
+- To let a function modify the caller's variable, mark the parameter `inout` AND write `inout` at the call site:
+
+```
+fn bump(inout n: Int, by: Int)
+  n = n + by
+end fn bump
+
+fn main()
+  effects io
+  var total = 0
+  bump(inout total, 5)
+  print(show(total))
+end fn main
+```
+
+- An `inout` argument must be a `var`, or a field or element of one. You can't pass the same variable as `inout` twice in one call.
+
+## 12. Typed holes
+
+When you don't know a value, write a hole rather than guessing:
+
+```
+let rate: Float = ?exchange_rate
+```
+
+Holes type-check (the context must fix their type), get listed by `candor check` with the variables in scope, trap if reached, and block `candor build`.
+
+## 13. Modules
+
+```
+use "lib/geometry.cnd"     # path relative to THIS file
+```
+
+- Names are global across the program; there are no namespaces.
+- A file may only NAME functions, types, variants and constants declared in itself or in a file it directly `use`s. Using another file's names without a `use` gives error `not-imported`.
+
+## 14. Built-ins (complete list)
+
+| call | type / effect |
+|---|---|
+| `print(s: Str)` / `eprint(s: Str)` | Unit; io |
+| `show(x)` | Int/Float/Bool/Str/distinct/payload-free enum -> Str |
+| `len(x)` | [T] or Str -> Int |
+| `push(xs, v)` / `pop(xs)` | Unit / T; xs must be a var place |
+| `array(n: Int, fill: T)` | [T] |
+| `to_float(i: Int)` / `to_int(f: Float)` | Float / Int (to_int truncates; traps out of range) |
+| `sqrt(f: Float)` | Float |
+| `assert(b: Bool)` | Unit; traps with the condition's text if false |
+| `byte_at(s: Str, i: Int)` | Int (0..255) |
+| `slice(s: Str, a: Int, b: Int)` | Str (bytes a..b-1) |
+| `from_byte(b: Int)` | 1-byte Str |
+| `join(parts: [Str], sep: Str)` | Str |
+| `parse_float(s: Str)` | Float; traps if invalid. There is no parse_int: write it with byte_at. |
+| `args()` | [Str] (program arguments); io |
+| `exit(code: Int)` | Unit; io |
+| `read_file(p: Str)` / `write_file(p: Str, s: Str)` | Str / Unit; fs; trap on failure |
+| `file_exists(p: Str)` | Bool; fs |
+| `clock_ms()` | Int; time |
+
+There is nothing else: no `min`/`max`/`abs`, no `sort`, no maps or dictionaries, no `str()`, no `int()`, no `range()`, no `format`. Write small helper functions yourself.
+
+## 15. Traps (runtime errors)
+
+Integer overflow, out-of-bounds indexing, division by zero, failed `requires`/`ensures`/`assert`, `pop` on an empty array, out-of-range `to_int`, and reaching a hole all stop the program with `trap in FN at FILE:LINE: message` and exit code 1.
+
+## 16. Precise semantics (questions models asked)
+
+- `and` / `or` SHORT-CIRCUIT. `len(xs) > 0 and xs[0] > 0` is safe; the right side runs only when needed.
+- Evaluation order is strictly left to right everywhere: arguments, operands, record fields.
+- Every block is its own scope: each `if`/`else` branch, each loop body and EACH `case` arm. So two `case` arms may both use `let a = ...`. Only nested (enclosing) scopes conflict.
+- A `let`/`var` inside a loop body is created fresh on each iteration.
+- `[]` takes its type from context: a typed `let`/`var`, a parameter (`f([])`), a return type (`return []`), or a field type. Only a bare `let x = []` needs an annotation.
+- Assignment and `push`/`pop` work through any depth of places: `grid[i][j] = v`, `push(rows[k], v)`, `acc.items[0] = 1`. The root must be a `var` or `inout` parameter.
+- An `inout` record parameter can have its fields assigned: `acc.balance = acc.balance + 1`.
+- `match`, `if`, `while` and `for` nest freely inside each other and inside loops. Arms may contain any statements, not only `return`.
+- `return` works anywhere, including inside loops and `match` arms. A Unit function may use a bare `return` to exit early.
+- Ranges whose end is before their start run zero times: `for i in 5 ..< 2 do` does nothing.
+- Recursion (including mutual recursion) is allowed.
+- `show(-3)` is `"-3"`. `show(2.0)` is `"2.0"`. `show(0.1 + 0.2)` is `"0.30000000000000004"`.
+- `f(x)[i]`, `m[i][j]` and `r.items[k].name` all work as expressions.
+- Names are case-sensitive: variant `Push` and built-in `push` don't clash.
+- `candor test FILE` runs the `example` clauses of FILE and of every module it uses.
+
+## 17. Habits from other languages that are WRONG in Candor
+
+| you might write | write instead |
+|---|---|
+| `x += 1`, `i++` | `x = x + 1` |
+| `!a`, `a && b`, `a \|\| b` | `not a`, `a and b`, `a or b` |
+| `"a" + "b"`, `f"{x}"` | `"a" ++ "b"`, `"x = " ++ show(x)` |
+| `{ ... }` blocks, `:` after if | `if c then ... end if` |
+| `end` alone, `}` | `end if`, `end while`, `end for`, `end match`, `end fn name` |
+| `for i in range(n)`, `for (i=0;...)` | `for i in 0 ..< n do ... end for` |
+| `xs.length`, `xs.push(v)`, `s.len()` | `len(xs)`, `push(xs, v)`, `len(s)` |
+| `xs.append(v)` on a `let` | declare `var xs`, then `push(xs, v)` |
+| `return` a value from a Unit fn | add `-> Type` to the signature |
+| `1 + 2.5`, `x / 2` with x Float | `to_float(1) + 2.5`, `x / 2.0` |
+| `if x:` / truthy ints | `if x != 0 then` |
+| `let x = 1` then `let x = 2` | use a new name, or `var x` and assign |
+| `null`, `None`, exceptions | an enum (`Some(v)` / `NoValue`) or a sentinel; contracts for preconditions |
+| `print(x)` with x an Int | `print(show(x))` |
+| `f(x)` result unused | `let _ = f(x)` |
+| `s[i]` on a Str | `byte_at(s, i)` (Int) or `slice(s, i, i + 1)` (Str) |
+| `case Circle { radius }`, `s.radius` on an enum | `case Circle(r)` |
+| `Shape.Circle(1.0)` | `Circle(1.0)` |
+| `fn f(x) {`, `def`, `func` | `fn f(x: Int) -> Int` ... `end fn f` |
+| `'c'` char literals | strings only: `"c"`; compare bytes with `byte_at` |
+
+## 18. A complete program
+
+```
+type Item = record
+  name: Str
+  qty: Int
+end type Item
+
+fn total_qty(items: [Item]) -> Int
+  example total_qty([]) == 0
+  var t = 0
+  for it in items do
+    t = t + it.qty
+  end for
+  return t
+end fn total_qty
+
+fn add_item(inout items: [Item], name: Str, qty: Int)
+  requires qty > 0
+  push(items, Item { name: name, qty: qty })
+end fn add_item
+
+fn parse_int(s: Str) -> Int
+  example parse_int("-42") == -42
+  var i = 0
+  var sign = 1
+  if len(s) > 0 and byte_at(s, 0) == 45 then
+    sign = -1
+    i = 1
+  end if
+  var n = 0
+  while i < len(s) do
+    n = n * 10 + (byte_at(s, i) - 48)
+    i = i + 1
+  end while
+  return sign * n
+end fn parse_int
+
+fn main()
+  effects io
+  var items: [Item] = []
+  add_item(inout items, "apple", parse_int("3"))
+  add_item(inout items, "pear", 2)
+  print("total: " ++ show(total_qty(items)))
+end fn main
+```
+
+## 19. Tooling
+
+```
+node src/cli.js check FILE [--json]   # errors: error[CODE] FILE:LINE:COL, message, hint
+node src/cli.js run FILE              # run immediately
+node src/cli.js test FILE             # run all `example` clauses
+node src/cli.js build FILE -o OUT     # native binary via C
+```
+
+Every error has a stable code (`type-mismatch`, `unknown-name`, `effect-missing`, `immutable`, `inout-mismatch`, `non-exhaustive`, `missing-return`, `unused-value`, `shadowing`, `not-imported`, `syntax`, `end-label-mismatch`, ...). The `hint` line is usually the exact edit to make.

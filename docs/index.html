@@ -15,6 +15,8 @@
     <a href="guide.html">Language guide</a>
     <a href="selfhosting.html">Self-hosting</a>
     <a href="roadmap.html">Roadmap</a>
+    <a href="eval.html">Evaluation</a>
+    <a href="llms.txt">llms.txt</a>
     <a class="gh" href="https://github.com/krishnapaul242/candor">GitHub</a>
   </nav>
 </div></header>
@@ -23,9 +25,10 @@
   <div class="prose">
     <p class="muted">An experiment by Krishna Paul, with the language designed and built by Claude</p>
     <h1>A programming language designed by a language model, for language models.</h1>
-    <p class="lede">Most languages are tuned so humans can <em>write</em> code quickly. Candor is tuned so humans can <em>verify</em> code that someone else wrote: every rule targets a specific way that LLMs get code wrong.</p>
+    <p class="lede">Candor's users are models. Its rules are designed so a model writes correct code from a single spec, so the compiler can tell it exactly what to fix, and so the human reviewing the result can trust what they read.</p>
     <div class="cta">
-      <a class="btn primary" href="guide.html">Read the guide</a>
+      <a class="btn primary" href="llms.txt">llms.txt: give this to your model</a>
+      <a class="btn" href="guide.html">Read the guide</a>
       <a class="btn" href="https://github.com/krishnapaul242/candor">View source</a>
       <a class="btn" href="roadmap.html">Roadmap</a>
     </div>
@@ -35,7 +38,7 @@
     <div class="stat"><b>Self-hosting</b><span>Candor compiles Candor, to a byte-identical fixed point</span></div>
     <div class="stat"><b>2 backends</b><span>instant JS dev loop, native C build</span></div>
     <div class="stat"><b>~10 ms</b><span>for the compiler to compile itself</span></div>
-    <div class="stat"><b>0 deps</b><span>Node ≥ 18 plus a C compiler</span></div>
+    <div class="stat"><b>9/9 + 9/9</b><span>tasks solved first try by two models that only read <a href="llms.txt">llms.txt</a> (<a href="eval.html">details</a>)</span></div>
   </div>
 
   <h2>A taste</h2>
@@ -78,6 +81,7 @@ end fn main</code></pre>
       <tr><td>"Where does this name come from?"</td><td><code>use "lexer.cnd"</code>. A file can name only what it, or a file it directly uses, declares. The error says which <code>use</code> to add.</td></tr>
       <tr><td>Aliasing and mutation at a distance</td><td>Value semantics. A callee can change your variable only through <code>inout</code>, and the call site has to say <code>inout</code> too.</td></tr>
       <tr><td>Off-by-one loops</td><td>Explicit ranges: <code>0 ..&lt; n</code> (exclusive) vs <code>1 ..= n</code> (inclusive).</td></tr>
+      <tr><td>Mixing up ids and plain numbers</td><td><code>type UserId = distinct Int</code>. Passing an <code>OrderId</code> where a <code>UserId</code> belongs is a compile error, and the hint gives the fix.</td></tr>
       <tr><td>Name confusion</td><td>No shadowing, globally unique enum variants, "did you mean" suggestions, <code>--json</code> diagnostics.</td></tr>
     </tbody>
   </table></div>
@@ -100,7 +104,7 @@ selfhost/test.sh                                 # bootstrap the self-hosted com
   </div>
 
   <div class="callout prose">
-    <p><strong>Status: experimental (v0.3).</strong> Native builds never free memory, and there are no generics yet. See the <a href="roadmap.html">roadmap</a> for what comes next and why.</p>
+    <p><strong>Status: experimental (v0.4).</strong> Native builds never free memory, and there are no generics yet. See the <a href="roadmap.html">roadmap</a> for what comes next and why.</p>
   </div>
 </main>
 

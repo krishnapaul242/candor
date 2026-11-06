@@ -1,0 +1,17 @@
+fn summarize(xs: [Int]) -> Str
+  requires len(xs) > 0
+  var sum = 0
+  var mx = xs[0]
+  for x in xs do
+    sum = sum + x
+    if x > mx then
+      mx = x
+    end if
+  end for
+  return "count=" ++ show(len(xs)) ++ " sum=" ++ show(sum) ++ " max=" ++ show(mx)
+end fn summarize
+
+fn print_summary(xs: [Int])
+  effects io
+  print(summarize(xs))
+end fn print_summary

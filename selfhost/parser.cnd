@@ -18,9 +18,9 @@ type Node = record
   flag: Bool
   k0: Int        # first child in Ast.kids
   nk: Int        # number of children
-  ty: Int        # checker: type id
+  ty: TyId       # checker: type id
   bind: Bind     # checker
-  ref: Int       # checker: referenced decl node (variant / fn), -1 if none
+  ref: NodeId    # checker: referenced decl node (variant / fn), NO_NODE if none
   what: RefKind  # checker
   copy: Bool     # checker: copy this whole read of a var place
   copy_in: Bool  # checker: copy because the value escapes
@@ -30,43 +30,43 @@ end type Node
 
 type Ast = record
   nodes: [Node]
-  kids: [Int]
+  kids: [NodeId]
 end type Ast
 
-fn kid(a: Ast, n: Int, i: Int) -> Int
+fn kid(a: Ast, n: NodeId, i: Int) -> NodeId
   return a.kids[a.nodes[n].k0 + i]
 end fn kid
 
-fn nkids(a: Ast, n: Int) -> Int
+fn nkids(a: Ast, n: NodeId) -> Int
   return a.nodes[n].nk
 end fn nkids
 
 # fn node children: params, ret type (-1 = Unit), requires, ensures, examples, effects, body
-fn fn_params(a: Ast, f: Int) -> Int
+fn fn_params(a: Ast, f: NodeId) -> NodeId
   return kid(a, f, 0)
 end fn fn_params
 
-fn fn_ret(a: Ast, f: Int) -> Int
+fn fn_ret(a: Ast, f: NodeId) -> NodeId
   return kid(a, f, 1)
 end fn fn_ret
 
-fn fn_requires(a: Ast, f: Int) -> Int
+fn fn_requires(a: Ast, f: NodeId) -> NodeId
   return kid(a, f, 2)
 end fn fn_requires
 
-fn fn_ensures(a: Ast, f: Int) -> Int
+fn fn_ensures(a: Ast, f: NodeId) -> NodeId
   return kid(a, f, 3)
 end fn fn_ensures
 
-fn fn_examples(a: Ast, f: Int) -> Int
+fn fn_examples(a: Ast, f: NodeId) -> NodeId
   return kid(a, f, 4)
 end fn fn_examples
 
-fn fn_effects(a: Ast, f: Int) -> Int
+fn fn_effects(a: Ast, f: NodeId) -> NodeId
   return kid(a, f, 5)
 end fn fn_effects
 
-fn fn_body(a: Ast, f: Int) -> Int
+fn fn_body(a: Ast, f: NodeId) -> NodeId
   return kid(a, f, 6)
 end fn fn_body
 
@@ -210,7 +210,7 @@ end fn end_line
 
 # ---------- node construction ----------
 
-fn mk(inout p: P, kind: NodeKind, line: Int, col: Int, start: Int, ks: [Int]) -> Int
+fn mk(inout p: P, kind: NodeKind, line: Int, col: Int, start: Int, ks: [NodeId]) -> NodeId
   let k0 = len(p.ast.kids)
   for k in ks do
     push(p.ast.kids, k)
@@ -219,19 +219,19 @@ fn mk(inout p: P, kind: NodeKind, line: Int, col: Int, start: Int, ks: [Int]) ->
   if p.pos > 0 then
     stop = p.toks[p.pos - 1].stop
   end if
-  push(p.ast.nodes, Node { kind: kind, line: line, col: col, start: start, stop: stop, name: "", ival: 0, fval: 0.0, sval: "", flag: false, k0: k0, nk: len(ks), ty: 0, bind: BNone, ref: -1, what: RNone, copy: false, copy_in: false, exh: false, file: p.file })
-  return len(p.ast.nodes) - 1
+  push(p.ast.nodes, Node { kind: kind, line: line, col: col, start: start, stop: stop, name: "", ival: 0, fval: 0.0, sval: "", flag: false, k0: k0, nk: len(ks), ty: NO_TY, bind: BNone, ref: NO_NODE, what: RNone, copy: false, copy_in: false, exh: false, file: p.file })
+  return NodeId(len(p.ast.nodes) - 1)
 end fn mk
 
 # Node at token `t`, spanning from token `t` to the last consumed token.
-fn mk_at(inout p: P, kind: NodeKind, t: Int, ks: [Int]) -> Int
+fn mk_at(inout p: P, kind: NodeKind, t: Int, ks: [NodeId]) -> NodeId
   let line = p.toks[t].line
   let col = p.toks[t].col
   let start = p.toks[t].start
   return mk(inout p, kind, line, col, start, ks)
 end fn mk_at
 
-fn set_name(inout p: P, n: Int, name: Str)
+fn set_name(inout p: P, n: NodeId, name: Str)
   p.ast.nodes[n].name = name
 end fn set_name
 
@@ -276,7 +276,7 @@ end fn close_block
 
 # ---------- types ----------
 
-fn parse_type(inout p: P) -> Int
+fn parse_type(inout p: P) -> NodeId
   let t = p.pos
   if at_op(p, "[") then
     let _ = next_tok(inout p)
@@ -296,7 +296,7 @@ fn parse_type(inout p: P) -> Int
 end fn parse_type
 
 # field list `name: Type` lines (records) — returns fielddecl nodes
-fn parse_field_decl(inout p: P) -> Int
+fn parse_field_decl(inout p: P) -> NodeId
   let ft = expect_ident(inout p, "a field name")
   let _ = expect_op(inout p, ":", "")
   let ty = parse_type(inout p)
@@ -305,18 +305,18 @@ fn parse_field_decl(inout p: P) -> Int
   return n
 end fn parse_field_decl
 
-fn parse_type_decl(inout p: P) -> Int
+fn parse_type_decl(inout p: P) -> NodeId
   let kw = next_tok(inout p)
   let nt = expect_ident(inout p, "a type name")
   let name = p.toks[nt].text
   let _ = expect_op(inout p, "=", "")
   if p.failed then
-    return 0
+    return NO_NODE
   end if
   if at_kw(p, "record") then
     let _ = next_tok(inout p)
     end_line(inout p)
-    var fields: [Int] = []
+    var fields: [NodeId] = []
     while not p.failed and not at_kw(p, "end") and not at_kind(p, TEof) do
       push(fields, parse_field_decl(inout p))
       end_line(inout p)
@@ -329,10 +329,10 @@ fn parse_type_decl(inout p: P) -> Int
   if at_kw(p, "enum") then
     let _ = next_tok(inout p)
     end_line(inout p)
-    var variants: [Int] = []
+    var variants: [NodeId] = []
     while not p.failed and not at_kw(p, "end") and not at_kind(p, TEof) do
       let vt = expect_ident(inout p, "a variant name")
-      var vfields: [Int] = []
+      var vfields: [NodeId] = []
       if at_op(p, "(") then
         let _ = next_tok(inout p)
         while not p.failed and not at_op(p, ")") do
@@ -358,18 +358,25 @@ fn parse_type_decl(inout p: P) -> Int
     set_name(inout p, en, name)
     return en
   end if
-  fail(inout p, "expected 'record' or 'enum' after 'type " ++ name ++ " ='", "")
-  return 0
+  if at_kw(p, "distinct") then
+    let _ = next_tok(inout p)
+    let base = parse_type(inout p)
+    let dn = mk_at(inout p, NDistinct, kw, [base])
+    set_name(inout p, dn, name)
+    return dn
+  end if
+  fail(inout p, "expected 'record', 'enum' or 'distinct' after 'type " ++ name ++ " ='", "")
+  return NO_NODE
 end fn parse_type_decl
 
 # ---------- functions ----------
 
-fn parse_fn(inout p: P) -> Int
+fn parse_fn(inout p: P) -> NodeId
   let kw = next_tok(inout p)
   let nt = expect_ident(inout p, "a function name")
   let name = p.toks[nt].text
   let _ = expect_op(inout p, "(", "")
-  var params: [Int] = []
+  var params: [NodeId] = []
   while not p.failed and not at_op(p, ")") do
     var inout_flag = false
     if at_kw(p, "inout") then
@@ -389,16 +396,16 @@ fn parse_fn(inout p: P) -> Int
     end if
   end while
   let _ = next_tok(inout p)
-  var ret = -1
+  var ret = NO_NODE
   if at_op(p, "->") then
     let _ = next_tok(inout p)
     ret = parse_type(inout p)
   end if
   end_line(inout p)
-  var reqs: [Int] = []
-  var enss: [Int] = []
-  var exs: [Int] = []
-  var effs: [Int] = []
+  var reqs: [NodeId] = []
+  var enss: [NodeId] = []
+  var exs: [NodeId] = []
+  var effs: [NodeId] = []
   while not p.failed do
     if at_kw(p, "requires") then
       let _ = next_tok(inout p)
@@ -446,9 +453,9 @@ fn at_block_end(p: P) -> Bool
   return at_kw(p, "end") or at_kw(p, "else") or at_kw(p, "case") or at_kind(p, TEof)
 end fn at_block_end
 
-fn parse_block(inout p: P) -> Int
+fn parse_block(inout p: P) -> NodeId
   let t = p.pos
-  var stmts: [Int] = []
+  var stmts: [NodeId] = []
   skip_nl(inout p)
   while not p.failed and not at_block_end(p) do
     push(stmts, parse_stmt(inout p))
@@ -458,13 +465,13 @@ end fn parse_block
 
 # ---------- statements ----------
 
-fn parse_stmt(inout p: P) -> Int
+fn parse_stmt(inout p: P) -> NodeId
   let t = p.pos
   if at_kw(p, "let") or at_kw(p, "var") then
     let is_var = at_kw(p, "var")
     let _ = next_tok(inout p)
     let nt = expect_ident(inout p, "a variable name")
-    var ty = -1
+    var ty = NO_NODE
     if at_op(p, ":") then
       let _ = next_tok(inout p)
       ty = parse_type(inout p)
@@ -483,7 +490,7 @@ fn parse_stmt(inout p: P) -> Int
   end if
   if at_kw(p, "if") then
     let _ = next_tok(inout p)
-    var ks: [Int] = []
+    var ks: [NodeId] = []
     push(ks, parse_expr(inout p))
     let _ = expect_kw(inout p, "then", "'then' after the if condition")
     end_line(inout p)
@@ -527,7 +534,7 @@ fn parse_stmt(inout p: P) -> Int
     let first = parse_expr(inout p)
     var is_range = false
     var inclusive = false
-    var last = -1
+    var last = NO_NODE
     if at_op(p, "..<") or at_op(p, "..=") then
       is_range = true
       inclusive = at_op(p, "..=")
@@ -541,7 +548,7 @@ fn parse_stmt(inout p: P) -> Int
     let body = parse_block(inout p)
     close_block(inout p, "for", t, "")
     end_line(inout p)
-    var n = 0
+    var n = NO_NODE
     if is_range then
       n = mk_at(inout p, NFor, t, [first, last, body])
     else
@@ -556,14 +563,14 @@ fn parse_stmt(inout p: P) -> Int
   end if
   if at_kw(p, "match") then
     let _ = next_tok(inout p)
-    var ks: [Int] = []
+    var ks: [NodeId] = []
     push(ks, parse_expr(inout p))
     end_line(inout p)
     while not p.failed and at_kw(p, "case") do
       let ct = next_tok(inout p)
       let vt = expect_ident(inout p, "a variant name or '_'")
       let vname = p.toks[vt].text
-      var binds: [Int] = []
+      var binds: [NodeId] = []
       if vname != "_" and at_op(p, "(") then
         let _ = next_tok(inout p)
         while not p.failed and not at_op(p, ")") do
@@ -647,11 +654,11 @@ fn level_has(p: P, level: Int) -> Bool
   return false
 end fn level_has
 
-fn parse_expr(inout p: P) -> Int
+fn parse_expr(inout p: P) -> NodeId
   return parse_bin(inout p, 0)
 end fn parse_expr
 
-fn parse_sub(inout p: P, level: Int) -> Int
+fn parse_sub(inout p: P, level: Int) -> NodeId
   if level == 0 then
     return parse_bin(inout p, 1)
   else if level == 1 then
@@ -664,7 +671,7 @@ fn parse_sub(inout p: P, level: Int) -> Int
   return parse_unary(inout p)
 end fn parse_sub
 
-fn parse_bin(inout p: P, level: Int) -> Int
+fn parse_bin(inout p: P, level: Int) -> NodeId
   let st = p.pos
   var l = parse_sub(inout p, level)
   while not p.failed and level_has(p, level) do
@@ -682,7 +689,7 @@ fn parse_bin(inout p: P, level: Int) -> Int
   return l
 end fn parse_bin
 
-fn parse_not(inout p: P) -> Int
+fn parse_not(inout p: P) -> NodeId
   if at_kw(p, "not") then
     let t = next_tok(inout p)
     let x = parse_not(inout p)
@@ -693,7 +700,7 @@ fn parse_not(inout p: P) -> Int
   return parse_bin(inout p, 3)
 end fn parse_not
 
-fn parse_unary(inout p: P) -> Int
+fn parse_unary(inout p: P) -> NodeId
   if at_op(p, "-") then
     let t = next_tok(inout p)
     let x = parse_unary(inout p)
@@ -704,7 +711,7 @@ fn parse_unary(inout p: P) -> Int
   return parse_postfix(inout p)
 end fn parse_unary
 
-fn parse_postfix(inout p: P) -> Int
+fn parse_postfix(inout p: P) -> NodeId
   let st = p.pos
   var e = parse_primary(inout p)
   while not p.failed do
@@ -731,7 +738,7 @@ fn parse_postfix(inout p: P) -> Int
   return e
 end fn parse_postfix
 
-fn parse_primary(inout p: P) -> Int
+fn parse_primary(inout p: P) -> NodeId
   let t = p.pos
   let k = tkind(p)
   if k == TInt then
@@ -773,7 +780,7 @@ fn parse_primary(inout p: P) -> Int
   end if
   if at_op(p, "[") then
     let _ = next_tok(inout p)
-    var items: [Int] = []
+    var items: [NodeId] = []
     while not p.failed and not at_op(p, "]") do
       push(items, parse_expr(inout p))
       if not at_op(p, "]") then
@@ -788,7 +795,7 @@ fn parse_primary(inout p: P) -> Int
     let _ = next_tok(inout p)
     if at_op(p, "(") then
       let _ = next_tok(inout p)
-      var args: [Int] = []
+      var args: [NodeId] = []
       while not p.failed and not at_op(p, ")") do
         if at_kw(p, "inout") then
           let it = next_tok(inout p)
@@ -811,7 +818,7 @@ fn parse_primary(inout p: P) -> Int
     end if
     if at_op(p, "{") then
       let _ = next_tok(inout p)
-      var fields: [Int] = []
+      var fields: [NodeId] = []
       while not p.failed and not at_op(p, "}") do
         let ft = expect_ident(inout p, "a field name")
         let _ = expect_op(inout p, ":", "")
@@ -837,21 +844,21 @@ fn parse_primary(inout p: P) -> Int
 end fn parse_primary
 
 # Top-level `let NAME: Type = expr` is a constant.
-fn parse_const(inout p: P) -> Int
+fn parse_const(inout p: P) -> NodeId
   let t = p.pos
   if at_kw(p, "var") then
     fail(inout p, "top-level 'var' is not allowed; top-level names are constants", "use 'let NAME: Type = ...'")
-    return 0
+    return NO_NODE
   end if
   let _ = next_tok(inout p)
   let nt = expect_ident(inout p, "a constant name")
   let name = p.toks[nt].text
   if p.failed then
-    return 0
+    return NO_NODE
   end if
   if not at_op(p, ":") then
     fail(inout p, "top-level constant '" ++ name ++ "' needs a type", "write 'let " ++ name ++ ": Type = ...'")
-    return 0
+    return NO_NODE
   end if
   let _ = next_tok(inout p)
   let ty = parse_type(inout p)
@@ -863,20 +870,20 @@ fn parse_const(inout p: P) -> Int
 end fn parse_const
 
 # The combined program: every file's declarations, dependencies first.
-fn add_program(inout a: Ast, decls: [Int]) -> Int
+fn add_program(inout a: Ast, decls: [NodeId]) -> NodeId
   let k0 = len(a.kids)
   for d in decls do
     push(a.kids, d)
   end for
-  push(a.nodes, Node { kind: NProgram, line: 1, col: 1, start: 0, stop: 0, name: "", ival: 0, fval: 0.0, sval: "", flag: false, k0: k0, nk: len(decls), ty: 0, bind: BNone, ref: -1, what: RNone, copy: false, copy_in: false, exh: false, file: 0 })
-  return len(a.nodes) - 1
+  push(a.nodes, Node { kind: NProgram, line: 1, col: 1, start: 0, stop: 0, name: "", ival: 0, fval: 0.0, sval: "", flag: false, k0: k0, nk: len(decls), ty: NO_TY, bind: BNone, ref: NO_NODE, what: RNone, copy: false, copy_in: false, exh: false, file: 0 })
+  return NodeId(len(a.nodes) - 1)
 end fn add_program
 
 # Parse one file into the shared arena `ast`; the last node is this file's program node.
 fn parse_program(src: Str, toks: [Tok], file: Int, ast: Ast) -> P
   var p = P { toks: toks, pos: 0, src: src, ast: ast, failed: false, err: no_diag(), file: file, uses: [], use_lines: [], use_cols: [] }
   skip_nl(inout p)
-  var decls: [Int] = []
+  var decls: [NodeId] = []
   while not p.failed and not at_kind(p, TEof) do
     if at_kw(p, "fn") then
       push(decls, parse_fn(inout p))

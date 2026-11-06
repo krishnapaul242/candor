@@ -1,0 +1,25 @@
+type UserId = distinct Int
+type OrderId = distinct Int
+type Bad = distinct [Int]
+
+fn lookup(id: UserId) -> Int
+  return id.value
+end fn lookup
+
+fn UserId() -> Int
+  return 0
+end fn UserId
+
+fn main()
+  let u = UserId(1)
+  let o = OrderId(2)
+  let a = lookup(o)
+  let b = lookup(5)
+  let c: Int = u
+  let d = u + UserId(1)
+  let e = u == o
+  var f = UserId(3)
+  f.value = 4
+  let g = u.raw
+  let h = UserId("x")
+end fn main

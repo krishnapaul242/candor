@@ -10,7 +10,7 @@ export const KNOWN_EFFECTS = { io: 'console, program args, exit', fs: 'reading a
 export const tyStr = (t) => t.k === 'Arr' ? `[${tyStr(t.el)}]` : t.name ?? t.k;
 export const tyEq = (a, b) => a.k === 'Err' || b.k === 'Err' ||
   (a.k === b.k && (a.k === 'Arr' ? tyEq(a.el, b.el) : a.name === b.name));
-export const mangle = (t) => t.k === 'Arr' ? `A_${mangle(t.el)}` : t.k === 'Rec' ? `R_${t.name}`
+export const mangle = (t) => t.k === 'Arr' ? `A_${mangle(t.el)}` : t.k === 'Rec' ? `R_${t.name}` : t.k === 'Dist' ? `D_${t.name}`
   : t.k === 'Enum' ? `E_${t.name}` : t.k[0].toLowerCase();
 
 // name -> { args: [Type|'any'...], ret, effects }  (special cases handled in checkCall)
@@ -95,8 +95,10 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       return ERR;
     }
     checkVisible(te, td, te.name);
-    return { k: td.kind === 'record' ? 'Rec' : 'Enum', name: td.name };
+    return { k: td.kind === 'record' ? 'Rec' : td.kind === 'enum' ? 'Enum' : 'Dist', name: td.name };
   };
+  // A distinct type has the representation of its base but is a separate type.
+  const baseOf = (t) => (t.k === 'Dist' ? types.get(t.name).baseT ?? ERR : t);
   for (const td of types.values()) {
     const seen = new Set();
     const resolveFields = (fields, owner) => {
@@ -107,7 +109,13 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
         if (f.t.k === 'Unit') err('unit-value', f, `fields cannot have type Unit`);
       }
     };
-    if (td.kind === 'record') resolveFields(td.fields, `record ${td.name}`);
+    if (td.kind === 'distinct') {
+      td.baseT = resolveType(td.base);
+      if (!['Int', 'Float', 'Str', 'Bool', 'Err'].includes(td.baseT.k)) {
+        err('bad-distinct', td, `distinct types wrap Int, Float, Str or Bool, not ${tyStr(td.baseT)}`, 'use a record to wrap anything else');
+        td.baseT = ERR;
+      }
+    } else if (td.kind === 'record') resolveFields(td.fields, `record ${td.name}`);
     else {
       td.variants.forEach((v, index) => {
         seen.clear();
@@ -144,6 +152,7 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       continue;
     }
     if (variants.has(fn.name)) err('duplicate', fn, `'${fn.name}' is already an enum variant`);
+    if (types.get(fn.name)?.kind === 'distinct') err('duplicate', fn, `'${fn.name}' is already a distinct type`);
     fns.set(fn.name, fn);
     const seen = new Set();
     const params = fn.params.map((pm) => {
@@ -233,6 +242,8 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       if (got.k === 'Int' && t.k === 'Float') hint = 'Candor has no implicit conversions; use to_float(...)';
       else if (got.k === 'Float' && t.k === 'Int') hint = 'use to_int(...) (truncates toward zero)';
       else if (t.k === 'Str' && ['Int', 'Float', 'Bool'].includes(got.k)) hint = 'use show(...) to make a Str';
+      else if (t.k === 'Dist' && tyEq(got, baseOf(t))) hint = `wrap it: ${t.name}(...)`;
+      else if (got.k === 'Dist' && tyEq(baseOf(got), t)) hint = `unwrap it with .value`;
       err('type-mismatch', e, `${what ?? 'expression'} has type ${tyStr(got)}, expected ${tyStr(t)}`, hint);
     }
     return got;
@@ -337,7 +348,10 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       }
       case 'index': {
         const bt = checkExpr(e.base, ctx, null, 'base');
-        expect(e.idx, ctx, Int, 'index');
+        const it = checkExpr(e.idx, ctx, Int);
+        if (it.k !== 'Int' && it.k !== 'Err' && !(it.k === 'Dist' && baseOf(it).k === 'Int')) {
+          err('type-mismatch', e.idx, `index has type ${tyStr(it)}, expected Int`, it.k === 'Float' ? 'use to_int(...) (truncates toward zero)' : undefined);
+        }
         if (bt.k === 'Err') return ERR;
         if (bt.k !== 'Arr') { err('type-mismatch', e, `can only index arrays, not ${tyStr(bt)}`); return ERR; }
         return bt.el;
@@ -345,6 +359,14 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       case 'field': {
         const bt = checkExpr(e.base, ctx, null, 'base');
         if (bt.k === 'Err') return ERR;
+        if (bt.k === 'Dist') {
+          if (e.name !== 'value') {
+            err('unknown-field', e, `${bt.name} is a distinct ${tyStr(baseOf(bt))}; its only field is .value`);
+            return ERR;
+          }
+          e.unwrap = true;
+          return baseOf(bt);
+        }
         if (bt.k !== 'Rec') {
           err('type-mismatch', e, `${tyStr(bt)} has no fields`, bt.k === 'Enum' ? 'use match to read enum payloads' : undefined);
           return ERR;
@@ -391,6 +413,11 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       err('type-mismatch', e, `'${op}' needs both sides to have the same type, got ${tyStr(lt)} and ${tyStr(rt)}`, hint);
       return ['+', '-', '*', '/', '%'].includes(op) ? lt : Bool;
     }
+    if (lt.k === 'Dist' && ['+', '-', '*', '/', '%'].includes(op)) {
+      err('type-mismatch', e, `'${op}' doesn't work on distinct type ${lt.name}`,
+        `ids aren't numbers; if you mean it, unwrap and rewrap: ${lt.name}(a.value ${op} b.value)`);
+      return lt;
+    }
     if (['+', '-', '*', '/'].includes(op)) {
       if (lt.k !== 'Int' && lt.k !== 'Float') {
         err('type-mismatch', e, `'${op}' works on Int or Float, not ${tyStr(lt)}`, lt.k === 'Str' && op === '+' ? `use '++' to join strings` : undefined);
@@ -402,13 +429,14 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       return lt;
     }
     if (op === '==' || op === '!=') {
-      if (!['Int', 'Float', 'Bool', 'Str'].includes(lt.k) && !simpleEnum(lt)) {
+      if (!['Int', 'Float', 'Bool', 'Str', 'Dist'].includes(lt.k) && !simpleEnum(lt)) {
         err('type-mismatch', e, `'${op}' compares Int, Float, Bool, Str or payload-free enums, not ${tyStr(lt)}`,
           lt.k === 'Enum' ? `${lt.name} has variants with payloads; use match to inspect them` : 'compare the fields you care about');
       }
       return Bool;
     }
-    if (lt.k !== 'Int' && lt.k !== 'Float') err('type-mismatch', e, `'${op}' orders Int or Float, not ${tyStr(lt)}`);
+    const lb = baseOf(lt);
+    if (lb.k !== 'Int' && lb.k !== 'Float' && lb.k !== 'Err') err('type-mismatch', e, `'${op}' orders Int or Float, not ${tyStr(lt)}`);
     return Bool;
   }
 
@@ -437,8 +465,8 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       if (e.name === 'show') {
         if (!arity(1)) return Str;
         const t = checkExpr(e.args[0], ctx);
-        if (!['Int', 'Float', 'Bool', 'Str', 'Err'].includes(t.k) && !simpleEnum(t)) {
-          err('type-mismatch', e, `show works on Int, Float, Bool, Str and payload-free enums; not ${tyStr(t)}`, 'write a describe function for your type');
+        if (!['Int', 'Float', 'Bool', 'Str', 'Err', 'Dist'].includes(t.k) && !simpleEnum(t)) {
+          err('type-mismatch', e, `show works on Int, Float, Bool, Str, distinct types and payload-free enums; not ${tyStr(t)}`, 'write a describe function for your type');
         }
         return Str;
       }
@@ -475,6 +503,14 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
         if (el.k === 'Unit') err('unit-value', e, 'arrays of Unit are not allowed');
         return el.k === 'Err' ? ERR : Arr(el);
       }
+    }
+    const dt = types.get(e.name);
+    if (dt && dt.kind === 'distinct') {
+      e.wrap = true;
+      checkVisible(e, dt, dt.name);
+      if (arity(1)) expect(e.args[0], ctx, dt.baseT ?? ERR, `value wrapped in ${dt.name}`);
+      else e.args.forEach((a) => checkExpr(a, ctx));
+      return { k: 'Dist', name: dt.name };
     }
     const fn = fns.get(e.name);
     if (!fn) {
@@ -523,6 +559,12 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
 
   function checkMutablePlace(tgt, ctx, verb) {
     if (!isPlace(tgt)) { err('not-assignable', tgt, `can only ${verb} a variable, field or element`); return; }
+    for (let p = tgt; p.e !== 'ident'; p = p.base) {
+      if (p.e === 'field' && p.unwrap) {
+        err('not-assignable', tgt, `the .value of a distinct type is read-only`, `assign a whole new value instead, e.g. x = ${p.base.ty.name}(...)`);
+        return;
+      }
+    }
     const root = placeRoot(tgt);
     const b = root.binding;
     if (b && !mutableKind(b)) {

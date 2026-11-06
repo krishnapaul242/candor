@@ -1,0 +1,20 @@
+fn parse_csv_ints(line: Str) -> [Int]
+  var out: [Int] = []
+  if len(line) == 0 then
+    return out
+  end if
+  var n = 0
+  var sign = 1
+  for i in 0 ..= len(line) do
+    if i == len(line) or byte_at(line, i) == 44 then
+      push(out, sign * n)
+      n = 0
+      sign = 1
+    else if byte_at(line, i) == 45 then
+      sign = -1
+    else
+      n = n * 10 + (byte_at(line, i) - 48)
+    end if
+  end for
+  return out
+end fn parse_csv_ints

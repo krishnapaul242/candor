@@ -1,0 +1,8 @@
+use "@SOL@"
+
+fn main()
+  effects io
+  print(summarize([3, -1, 9, 2]))
+  print(summarize([-5]))
+  print_summary([1, 2, 3])
+end fn main

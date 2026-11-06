@@ -1,0 +1,9 @@
+use "@SOL@"
+
+fn main()
+  effects io
+  print(join(fizzbuzz(15), ","))
+  print(show(len(fizzbuzz(0))) ++ " " ++ show(len(fizzbuzz(-3))) ++ " " ++ join(fizzbuzz(1), ","))
+  let big = fizzbuzz(100)
+  print(big[98] ++ " " ++ big[99] ++ " " ++ big[89])
+end fn main

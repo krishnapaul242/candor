@@ -1,0 +1,21 @@
+use "@SOL@"
+
+fn show_m(m: [[Int]]) -> Str
+  var rows: [Str] = []
+  for r in m do
+    var cells: [Str] = []
+    for x in r do
+      push(cells, show(x))
+    end for
+    push(rows, join(cells, " "))
+  end for
+  return "[" ++ join(rows, " | ") ++ "]"
+end fn show_m
+
+fn main()
+  effects io
+  print(show_m(transpose([[1, 2, 3], [4, 5, 6]])))
+  print(show_m(transpose([[1], [2], [3]])))
+  print(show_m(transpose([])))
+  print(show_m(transpose([[7]])))
+end fn main

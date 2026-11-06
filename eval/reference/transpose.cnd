@@ -1,0 +1,14 @@
+fn transpose(m: [[Int]]) -> [[Int]]
+  var out: [[Int]] = []
+  if len(m) == 0 then
+    return out
+  end if
+  for c in 0 ..< len(m[0]) do
+    var row: [Int] = []
+    for r in 0 ..< len(m) do
+      push(row, m[r][c])
+    end for
+    push(out, row)
+  end for
+  return out
+end fn transpose

@@ -24,6 +24,7 @@ export function genC(program, info) {
 
   const ctype = (t) => {
     switch (t.k) {
+      case 'Dist': return ctype(types.get(t.name).baseT);
       case 'Int': return 'int64_t';
       case 'Float': return 'double';
       case 'Bool': return 'bool';
@@ -111,7 +112,7 @@ export function genC(program, info) {
         const a = T(), i = T();
         return `({ cn_arr* ${a} = ${expr(e.base, fn)}; int64_t ${i} = cn_at(${a}, ${expr(e.idx, fn)}, ${L(fn, e)}); ((${et}*)${a}->data)[${i}]; })`;
       }
-      case 'field': return `(${expr(e.base, fn)}).f_${e.name}`;
+      case 'field': return e.unwrap ? `(${expr(e.base, fn)})` : `(${expr(e.base, fn)}).f_${e.name}`;
       case 'un':
         if (e.op === 'not') return `(!${expr(e.x, fn)})`;
         return `(-${expr(e.x, fn)})`;
@@ -119,7 +120,7 @@ export function genC(program, info) {
         const { op } = e;
         if (op === 'and') return `(${expr(e.l, fn)} && ${expr(e.r, fn)})`;
         if (op === 'or') return `(${expr(e.l, fn)} || ${expr(e.r, fn)})`;
-        const lt = e.l.ty.k;
+        const lt = (e.l.ty.k === 'Dist' ? types.get(e.l.ty.name).baseT : e.l.ty).k;
         const ps = parts([e.l, e.r], fn);
         if (op === '++') return seq(ps, ([l, r]) => `cn_cat(${l}, ${r})`);
         if (lt === 'Str') return seq(ps, ([l, r]) => `${op === '!=' ? '!' : ''}cn_str_eq(${l}, ${r})`);
@@ -133,11 +134,13 @@ export function genC(program, info) {
           if (!e.variant.fields.length) return `(&cn_V_${e.name})`;
           return seq(parts(e.args, fn), (vals) => `mk_${e.name}(${vals.join(', ')})`);
         }
+        if (e.wrap) return expr(e.args[0], fn);
         if (e.builtin) {
           const a0 = e.args[0];
           switch (e.name) {
             case 'print': return `cn_print(${expr(a0, fn)})`;
             case 'show':
+              if (a0.ty.k === 'Dist') return ({ Int: 'cn_show_i', Float: 'cn_show_f', Bool: 'cn_show_b', Str: '' })[types.get(a0.ty.name).baseT.k] + `(${expr(a0, fn)})`;
               if (a0.ty.k === 'Enum') return `cn_names_${a0.ty.name}[(${expr(a0, fn)})->tag]`;
               return ({ Int: 'cn_show_i', Float: 'cn_show_f', Bool: 'cn_show_b', Str: '' })[a0.ty.k] + `(${expr(a0, fn)})`;
             case 'len': return `(${expr(a0, fn)})${a0.ty.k === 'Str' ? '.len' : '->len'}`;

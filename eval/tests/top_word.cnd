@@ -1,0 +1,11 @@
+use "@SOL@"
+
+fn main()
+  effects io
+  print("[" ++ top_word("the cat and the hat") ++ "]")
+  print("[" ++ top_word("  b a  b a c ") ++ "]")
+  print("[" ++ top_word("") ++ "]")
+  print("[" ++ top_word("     ") ++ "]")
+  print("[" ++ top_word("solo") ++ "]")
+  print("[" ++ top_word("x yy x yy yy") ++ "]")
+end fn main

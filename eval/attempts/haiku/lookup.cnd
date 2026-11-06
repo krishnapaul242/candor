@@ -1,0 +1,13 @@
+type Lookup = enum
+  Found(index: Int)
+  Missing
+end type Lookup
+
+fn index_of(names: [Str], name: Str) -> Lookup
+  for i in 0 ..< len(names) do
+    if names[i] == name then
+      return Found(i)
+    end if
+  end for
+  return Missing
+end fn index_of

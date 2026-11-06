@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candor Model Evaluation</title>
+<meta name="description" content="Can a model that has never seen Candor write correct code from llms.txt alone? Method, results, and what the models told us.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="./">Candor<span>.</span></a>
+  <nav class="site">
+    <a href="./">Overview</a>
+    <a href="guide.html">Language guide</a>
+    <a href="selfhosting.html">Self-hosting</a>
+    <a href="roadmap.html">Roadmap</a>
+    <a href="eval.html" aria-current="page">Evaluation</a>
+    <a href="llms.txt">llms.txt</a>
+    <a class="gh" href="https://github.com/krishnapaul242/candor">GitHub</a>
+  </nav>
+</div></header>
+
+<main><div class="prose">
+  <h1>Can models write Candor?</h1>
+  <p class="lede">Candor exists for code that models write. So the measure that matters is whether a model that has never seen it writes correct Candor from the reference alone. This page reports round 1, including what it doesn't show.</p>
+
+  <h2>Method</h2>
+  <ul>
+    <li><strong>Reference:</strong> <a href="llms.txt"><code>llms.txt</code></a>, one dense spec meant for a context window, and the only thing participants read.</li>
+    <li><strong>Tasks:</strong> nine, each touching something Candor-specific: payload enums and <code>match</code>, <code>inout</code> records, <code>requires</code> contracts, <code>effects</code>, byte-level strings, nested arrays, binary search, an Option-style enum (<a href="https://github.com/krishnapaul242/candor/blob/main/eval/TASKS.md">TASKS.md</a>).</li>
+    <li><strong>Isolation:</strong> each model ran as a fresh agent in a scratch folder holding only the spec and the tasks. It had no repository, no reference solutions and <strong>no compiler</strong>, so this measures first attempts.</li>
+    <li><strong>Scoring:</strong> hidden test programs <code>use</code> each solution and compare output exactly. The two contract tasks also check that a bad call traps with <code>requires failed</code>. The scorer was itself tested: reference solutions score 9/9, and a copy with four planted bugs scores 5/9.</li>
+  </ul>
+
+  <h2>Round 1 results</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Model</th><th>Compiled first time</th><th>Hidden tests passed</th></tr></thead>
+    <tbody>
+      <tr><td>Claude, large (same family as Candor's designer)</td><td>9 / 9</td><td><strong>9 / 9</strong></td></tr>
+      <tr><td>Claude Haiku, small</td><td>9 / 9</td><td><strong>9 / 9</strong></td></tr>
+    </tbody>
+  </table></div>
+  <p>Neither model hit a single compile error, and the <code>example</code> clauses they wrote for themselves all pass.</p>
+
+  <div class="callout">
+    <p><strong>Read this carefully.</strong> 100% from both models means these tasks are <em>too easy</em> to show where models struggle, and the repair phase had nothing to repair. Both participants are Claude models, the same family that designed Candor. Nine tasks is a small sample. Round 2 fixes all three.</p>
+  </div>
+
+  <h2>The useful signal: an uncertainty tax</h2>
+  <p>Each participant listed everything in the spec that was unclear. Working independently, the two models raised <strong>the same questions</strong>:</p>
+  <ul>
+    <li>Do <code>and</code> / <code>or</code> short-circuit?</li>
+    <li>Is each <code>case</code> arm its own scope?</li>
+    <li>Does <code>[]</code> take its type from a parameter or return type?</li>
+    <li>Are nested writes like <code>grid[i][j] = v</code> allowed? Can an <code>inout</code> record's fields be assigned?</li>
+    <li>Can <code>match</code> sit inside a loop, with any statements in its arms?</li>
+  </ul>
+  <p>The answer to all of them is yes. The gaps caused no bugs, but both models paid for them with <strong>defensive code</strong>: nested <code>if</code>s instead of short-circuit tests, different names in every <code>case</code> arm, typed temporaries instead of <code>return []</code>, and avoided nested writes. That code is longer and harder to review than it needs to be.</p>
+  <p><strong>What changed:</strong> <code>llms.txt</code> gained a "Precise semantics" section that answers each question directly, with every answer checked against both backends. A new test, <code>tests/spec.sh</code>, type-checks every complete program in the spec. On its first run it caught a broken example in the Records section that showed statements at the top level of a file, a pattern a model could easily copy.</p>
+
+  <h2>Round 2 (planned)</h2>
+  <ol>
+    <li><strong>Harder tasks:</strong> multiple files with <code>use</code>, 150+ line programs, distinct-type ids, holes, and traps hidden in the obvious solution.</li>
+    <li><strong>More model families and sizes</strong>, including small open models.</li>
+    <li><strong>The repair loop:</strong> each failing attempt gets only the compiler's <code>--json</code> diagnostics, and we count the rounds until it passes. This tests whether Candor's error messages work <em>for models</em>, which is the point of having them.</li>
+  </ol>
+  <p>Everything is reproducible: <code>eval/score.sh eval/attempts/&lt;model&gt;</code>. The attempts are in the repo exactly as the models wrote them.</p>
+</div></main>
+
+<footer class="site"><div class="inner">
+  Candor · <a href="https://github.com/krishnapaul242/candor">github.com/krishnapaul242/candor</a> · designed and built by Claude (Anthropic) with Krishna Paul
+</div></footer>
+</body>
+</html>

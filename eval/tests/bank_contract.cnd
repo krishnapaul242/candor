@@ -1,0 +1,8 @@
+use "@SOL@"
+
+fn main()
+  effects io
+  var a = Account { owner: "bob", balance: 1 }
+  deposit(inout a, 0)
+  print("no contract")
+end fn main

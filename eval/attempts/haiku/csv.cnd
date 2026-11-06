@@ -1,0 +1,33 @@
+fn parse_csv_ints(line: Str) -> [Int]
+  var out: [Int] = []
+  let n = len(line)
+  if n == 0 then
+    return out
+  end if
+  var i = 0
+  var neg = false
+  var cur = 0
+  while i < n do
+    let c = byte_at(line, i)
+    if c == 44 then
+      if neg then
+        push(out, 0 - cur)
+      else
+        push(out, cur)
+      end if
+      neg = false
+      cur = 0
+    else if c == 45 then
+      neg = true
+    else
+      cur = cur * 10 + (c - 48)
+    end if
+    i = i + 1
+  end while
+  if neg then
+    push(out, 0 - cur)
+  else
+    push(out, cur)
+  end if
+  return out
+end fn parse_csv_ints

@@ -15,19 +15,22 @@
     <a href="guide.html">Language guide</a>
     <a href="selfhosting.html">Self-hosting</a>
     <a href="roadmap.html" aria-current="page">Roadmap</a>
+    <a href="eval.html">Evaluation</a>
+    <a href="llms.txt">llms.txt</a>
     <a class="gh" href="https://github.com/krishnapaul242/candor">GitHub</a>
   </nav>
 </div></header>
 
 <main><div class="prose">
   <h1>Roadmap</h1>
-  <p class="lede">The order comes from evidence: what hurt while writing Candor's own compiler in Candor. Each milestone has a concrete way to tell it's done.</p>
+  <p class="lede">Candor is a language for models, so the order comes from two kinds of evidence: how models do when they write it (<a href="eval.html">evaluation</a>), and what hurt while writing Candor's own compiler in Candor. Each milestone has a concrete way to tell it's done.</p>
 
   <div class="callout">
     <p><strong>Ground rules for every change:</strong></p>
     <p>1. It lands in both compilers, the JS reference and the self-hosted <code>candorc</code>.</p>
     <p>2. Both backends and both compilers stay byte-identical on every test, and the bootstrap still reaches its fixed point.</p>
     <p>3. Each new rule comes with a diagnostic that says what to change, not just what's wrong.</p>
+    <p>4. It lands in <a href="llms.txt"><code>llms.txt</code></a>, the spec models read, and every example there must compile.</p>
   </div>
 
   <h2>Done</h2>
@@ -48,44 +51,43 @@
     <p class="muted"><strong>Done:</strong> <code>candorc</code> is six modules connected by <code>use</code>, <code>build.sh</code> is gone, and errors cite the real file (<code>selfhost/lexer.cnd:46:19</code>). Visibility is direct: deleting one <code>use</code> from <code>cgen.cnd</code> produces 165 <code>not-imported</code> errors, each naming the line to add. Traps name their file too.</p>
   </div>
 
+  <div class="milestone">
+    <h3>v0.4: Distinct types and the first model evaluation <span class="badge done">done</span></h3>
+    <p><code>type UserId = distinct Int</code>: wrap with <code>UserId(5)</code>, unwrap with <code>.value</code>, and no arithmetic. Every mix-up gets a hint that is the exact edit. <code>candorc</code> now uses <code>NodeId</code> and <code>TyId</code>. Retyping it surfaced 212 places where the two kinds of id met, including two bugs in my own refactoring scripts, and swapping one for the other is now a compile error. (Token indices stayed <code>Int</code>, since they never leave the parser.)</p>
+    <p>Also in this release: <a href="llms.txt"><code>llms.txt</code></a>, the spec written for models, and the <a href="eval.html">first evaluation</a>. Both models scored 9/9 from the spec alone, and the gaps they reported became a "precise semantics" section.</p>
+  </div>
+
   <h2>Next</h2>
+  <p>Candor is for models, so the next milestone is about the <em>feedback loop between models and the compiler</em>, ahead of more language features.</p>
 
   <div class="milestone">
-    <h3>v0.4: Distinct types <span class="badge next">next</span></h3>
-    <p><code>type TyId = distinct Int</code>: same representation, but not interchangeable with <code>Int</code> or with another distinct type. In <code>candorc</code> today, type ids and AST node ids are both <code>Int</code>, and mixing them up type-checks.</p>
-    <p class="muted"><strong>Done when:</strong> <code>candorc</code> uses <code>TyId</code>, <code>NodeId</code> and <code>TokIdx</code>, and swapping any two is a compile error.</p>
+    <h3>v0.5: Model feedback loop <span class="badge next">next</span></h3>
+    <ul>
+      <li><strong>Machine-applicable fixes.</strong> Every diagnostic whose hint is an edit (add <code>effects io</code>, add a <code>use</code>, wrap in <code>UserId(...)</code>, write <code>let _ =</code>) also carries a structured <code>fix</code> in <code>--json</code>: file, range and replacement text, ready for a model to apply.</li>
+      <li><strong>Evaluation round 2.</strong> Harder tasks: multiple files, 150+ lines, ids, holes, traps hidden in obvious solutions. More model families and sizes. Then the <strong>repair loop</strong>: give a failing model only the <code>--json</code> diagnostics and count the rounds until it passes.</li>
+      <li><strong>Spec-first changes.</strong> Each language change lands in <code>llms.txt</code> together with the code, and <code>tests/spec.sh</code> keeps every example in it compiling.</li>
+    </ul>
+    <p class="muted"><strong>Done when:</strong> round 2 runs on at least three model families and the results page shows first-attempt rate, repair rounds, and the error codes models hit most. The worst-performing diagnostic gets rewritten, and the measurement is rerun.</p>
   </div>
 
   <div class="milestone">
-    <h3>v0.5: Generics and error propagation</h3>
+    <h3>v0.6: Generics and error propagation</h3>
     <p>Generic records, enums and functions, compiled by monomorphization in C. In the standard library: <code>Option[T]</code> and <code>Result[T, E]</code>, with a visible way to propagate errors (for example <code>try parse_expr(inout p)</code>) inside functions that return <code>Result</code>.</p>
-    <p class="muted"><strong>Done when:</strong> the <code>failed</code> flag disappears from <code>candorc</code>'s parser, <code>read_file</code> returns a <code>Result</code> instead of trapping, and generic code produces readable errors.</p>
+    <p class="muted"><strong>Done when:</strong> the <code>failed</code> flag disappears from <code>candorc</code>'s parser, <code>read_file</code> returns a <code>Result</code> instead of trapping, generic code produces readable errors, and models can use all of it from <code>llms.txt</code> alone (measured).</p>
   </div>
 
   <div class="milestone">
-    <h3>v0.6: Memory</h3>
-    <p>Reference counting with copy-on-write in the native backend. Memory gets freed, and the remaining eager copies (when a value escapes, or on <code>let b = a</code>) become lazy.</p>
-    <p class="muted"><strong>Done when:</strong> the binary-trees benchmark peaks under 50&nbsp;MB (453&nbsp;MB today), long-running loops use bounded memory, and no benchmark gets slower by more than 10%.</p>
+    <h3>v0.7: Memory</h3>
+    <p>Reference counting with copy-on-write in the native backend. Memory gets freed, and the remaining eager copies become lazy. This includes the arena copy that loading modules causes today.</p>
+    <p class="muted"><strong>Done when:</strong> the binary-trees benchmark peaks under 50&nbsp;MB (453&nbsp;MB today), self-compiling drops back to about 36&nbsp;MB, and no benchmark gets slower by more than 10%.</p>
   </div>
 
   <div class="milestone">
-    <h3>v0.7: A typed AST for <code>candorc</code></h3>
-    <p>With generics and data-carrying enums, the compiler's arena of generic nodes becomes separate types for statements, expressions and types. The big dispatch functions become exhaustive <code>match</code>es, so adding a node kind fails to compile until every pass handles it.</p>
+    <h3>v0.8: A typed AST for <code>candorc</code></h3>
+    <p>With generics and data-carrying enums, the compiler's arena of generic nodes becomes separate types for statements, expressions and types. The big dispatch functions become exhaustive <code>match</code>es.</p>
   </div>
 
   <h2>Parallel tracks</h2>
-
-  <div class="milestone">
-    <h3>Research: can models actually write Candor well?</h3>
-    <p>This is the question behind the whole project. Give a fresh model only the <a href="guide.html">language guide</a>, then have it solve a fixed task set in Candor and in TypeScript or Python. Measure:</p>
-    <ul>
-      <li>whether the code is correct on the first try;</li>
-      <li>how many attempts it takes to reach correct code;</li>
-      <li>which bugs Candor's rules catch: effects, holes, contracts, traps;</li>
-      <li>which Candor rules the model trips over.</li>
-    </ul>
-    <p>Publish the results here, including the unflattering ones.</p>
-  </div>
 
   <div class="milestone">
     <h3>Tooling</h3>

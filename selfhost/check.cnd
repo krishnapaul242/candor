@@ -7,7 +7,7 @@ use "parser.cnd"
 type Ty = record
   k: TyKind
   name: Str
-  el: Int
+  el: TyId
 end type Ty
 
 type Hole = record
@@ -31,59 +31,61 @@ type Cx = record
   types: StrMap
   variants: StrMap
   fns: StrMap
-  fn_list: [Int]
-  cur_fn: Int
+  fn_list: [NodeId]
+  cur_fn: NodeId
   effs: [Str]
   where: Str
   loops: Int
   sc_n: Int
   sc_names: [Str]
-  sc_tys: [Int]
+  sc_tys: [TyId]
   sc_kinds: [Bind]
   sc_lines: [Int]
   sc_marks: [Int]
-  const_nodes: [Int]
+  const_nodes: [NodeId]
   const_names: [Str]
-  const_tys: [Int]
+  const_tys: [TyId]
   const_lines: [Int]
-  const_decls: [Int]
+  const_decls: [NodeId]
 end type Cx
 
 fn new_cx(ast: Ast, srcs: [Str], files: [Str], uses: [[Int]]) -> Cx
-  let tys = [Ty { k: YErr, name: "", el: -1 }, Ty { k: YInt, name: "", el: -1 }, Ty { k: YFloat, name: "", el: -1 }, Ty { k: YBool, name: "", el: -1 }, Ty { k: YStr, name: "", el: -1 }, Ty { k: YUnit, name: "", el: -1 }, Ty { k: YArr, name: "", el: 4 }]
-  return Cx { ast: ast, srcs: srcs, files: files, uses: uses, tys: tys, diags: [], holes: [], types: map_new(), variants: map_new(), fns: map_new(), fn_list: [], cur_fn: -1, effs: [], where: "body", loops: 0, sc_n: 0, sc_names: [], sc_tys: [], sc_kinds: [], sc_lines: [], sc_marks: [], const_nodes: [], const_names: [], const_tys: [], const_lines: [], const_decls: [] }
+  let tys = [Ty { k: YErr, name: "", el: NO_TY }, Ty { k: YInt, name: "", el: NO_TY }, Ty { k: YFloat, name: "", el: NO_TY }, Ty { k: YBool, name: "", el: NO_TY }, Ty { k: YStr, name: "", el: NO_TY }, Ty { k: YUnit, name: "", el: NO_TY }, Ty { k: YArr, name: "", el: TyId(4) }]
+  return Cx { ast: ast, srcs: srcs, files: files, uses: uses, tys: tys, diags: [], holes: [], types: map_new(), variants: map_new(), fns: map_new(), fn_list: [], cur_fn: NO_NODE, effs: [], where: "body", loops: 0, sc_n: 0, sc_names: [], sc_tys: [], sc_kinds: [], sc_lines: [], sc_marks: [], const_nodes: [], const_names: [], const_tys: [], const_lines: [], const_decls: [] }
 end fn new_cx
 
 # ---------- types ----------
 # Fixed ids for the prelude types.
 
-let T_ERR: Int = 0
-let T_INT: Int = 1
-let T_FLOAT: Int = 2
-let T_BOOL: Int = 3
-let T_STR: Int = 4
-let T_UNIT: Int = 5
-let T_STRS: Int = 6
+let T_ERR: TyId = TyId(0)
+let T_INT: TyId = TyId(1)
+let T_FLOAT: TyId = TyId(2)
+let T_BOOL: TyId = TyId(3)
+let T_STR: TyId = TyId(4)
+let T_UNIT: TyId = TyId(5)
+let T_STRS: TyId = TyId(6)
 
 
 
-fn intern(inout cx: Cx, k: TyKind, name: Str, el: Int) -> Int
+fn intern(inout cx: Cx, k: TyKind, name: Str, el: TyId) -> TyId
   for i in 0 ..< len(cx.tys) do
     if cx.tys[i].k == k and cx.tys[i].name == name and cx.tys[i].el == el then
-      return i
+      return TyId(i)
     end if
   end for
   push(cx.tys, Ty { k: k, name: name, el: el })
-  return len(cx.tys) - 1
+  return TyId(len(cx.tys) - 1)
 end fn intern
 
-fn ty_str(cx: Cx, t: Int) -> Str
+fn ty_str(cx: Cx, t: TyId) -> Str
   match cx.tys[t].k
     case YArr
       return "[" ++ ty_str(cx, cx.tys[t].el) ++ "]"
     case YRec
       return cx.tys[t].name
     case YEnum
+      return cx.tys[t].name
+    case YDist
       return cx.tys[t].name
     case YErr
       return "Err"
@@ -100,20 +102,20 @@ fn ty_str(cx: Cx, t: Int) -> Str
   end match
 end fn ty_str
 
-fn ty_eq(a: Int, b: Int) -> Bool
-  return a == 0 or b == 0 or a == b
+fn ty_eq(a: TyId, b: TyId) -> Bool
+  return a == T_ERR or b == T_ERR or a == b
 end fn ty_eq
 
-fn tk(cx: Cx, t: Int) -> TyKind
+fn tk(cx: Cx, t: TyId) -> TyKind
   return cx.tys[t].k
 end fn tk
 
 # A payload-free enum is a plain tag, so == and show are meaningful for it.
-fn simple_enum(cx: Cx, t: Int) -> Bool
+fn simple_enum(cx: Cx, t: TyId) -> Bool
   if cx.tys[t].k != YEnum then
     return false
   end if
-  let d = map_get(cx.types, cx.tys[t].name)
+  let d = type_decl(cx, cx.tys[t].name)
   for i in 0 ..< cnk(cx, d) do
     if cnk(cx, ckid(cx, d, i)) > 0 then
       return false
@@ -122,14 +124,22 @@ fn simple_enum(cx: Cx, t: Int) -> Bool
   return true
 end fn simple_enum
 
-fn needs_copy_any(cx: Cx, t: Int) -> Bool
+# A distinct type has the representation of its base but is a separate type.
+fn base_of(cx: Cx, t: TyId) -> TyId
+  if cx.tys[t].k != YDist then
+    return t
+  end if
+  return cx.ast.nodes[type_decl(cx, cx.tys[t].name)].ty
+end fn base_of
+
+fn needs_copy_any(cx: Cx, t: TyId) -> Bool
   let k = cx.tys[t].k
   return k == YArr or k == YRec
 end fn needs_copy_any
 
 # ---------- diagnostics ----------
 
-fn err(inout cx: Cx, code: Str, n: Int, msg: Str, hint: Str)
+fn err(inout cx: Cx, code: Str, n: NodeId, msg: Str, hint: Str)
   let file = cx.ast.nodes[n].file
   let line = cx.ast.nodes[n].line
   let col = cx.ast.nodes[n].col
@@ -137,7 +147,7 @@ fn err(inout cx: Cx, code: Str, n: Int, msg: Str, hint: Str)
 end fn err
 
 # A file may only name what it declares or what a file it directly `use`s declares.
-fn check_visible(inout cx: Cx, at: Int, decl: Int, name: Str)
+fn check_visible(inout cx: Cx, at: NodeId, decl: NodeId, name: Str)
   let from = cx.ast.nodes[at].file
   let to = cx.ast.nodes[decl].file
   if from == to then
@@ -153,8 +163,8 @@ fn check_visible(inout cx: Cx, at: Int, decl: Int, name: Str)
 end fn check_visible
 
 # " (first defined in other.cnd:12)" when a duplicate's original lives in another file
-fn elsewhere(cx: Cx, prev: Int, dup: Int) -> Str
-  if prev < 0 or cx.ast.nodes[prev].file == cx.ast.nodes[dup].file then
+fn elsewhere(cx: Cx, prev: NodeId, dup: NodeId) -> Str
+  if prev == NO_NODE or cx.ast.nodes[prev].file == cx.ast.nodes[dup].file then
     return ""
   end if
   return " (first defined in " ++ cx.files[cx.ast.nodes[prev].file] ++ ":" ++ show(cx.ast.nodes[prev].line) ++ ")"
@@ -167,23 +177,36 @@ fn did_you_mean(s: Str, fallback: Str) -> Str
   return fallback
 end fn did_you_mean
 
-fn nname(cx: Cx, n: Int) -> Str
+# StrMap stores plain Ints; these lookups give the result its id type (NO_NODE if absent).
+fn type_decl(cx: Cx, name: Str) -> NodeId
+  return NodeId(map_get(cx.types, name))
+end fn type_decl
+
+fn variant_decl(cx: Cx, name: Str) -> NodeId
+  return NodeId(map_get(cx.variants, name))
+end fn variant_decl
+
+fn fn_decl(cx: Cx, name: Str) -> NodeId
+  return NodeId(map_get(cx.fns, name))
+end fn fn_decl
+
+fn nname(cx: Cx, n: NodeId) -> Str
   return cx.ast.nodes[n].name
 end fn nname
 
-fn nkind(cx: Cx, n: Int) -> NodeKind
+fn nkind(cx: Cx, n: NodeId) -> NodeKind
   return cx.ast.nodes[n].kind
 end fn nkind
 
-fn ckid(cx: Cx, n: Int, i: Int) -> Int
+fn ckid(cx: Cx, n: NodeId, i: Int) -> NodeId
   return cx.ast.kids[cx.ast.nodes[n].k0 + i]
 end fn ckid
 
-fn cnk(cx: Cx, n: Int) -> Int
+fn cnk(cx: Cx, n: NodeId) -> Int
   return cx.ast.nodes[n].nk
 end fn cnk
 
-fn src_of(cx: Cx, n: Int) -> Str
+fn src_of(cx: Cx, n: NodeId) -> Str
   return slice(cx.srcs[cx.ast.nodes[n].file], cx.ast.nodes[n].start, cx.ast.nodes[n].stop)
 end fn src_of
 
@@ -219,7 +242,7 @@ fn visible_names(cx: Cx) -> [Str]
   return out
 end fn visible_names
 
-fn declare(inout cx: Cx, name: Str, t: Int, kind: Bind, at: Int)
+fn declare(inout cx: Cx, name: Str, t: TyId, kind: Bind, at: NodeId)
   if name == "_" then
     return
   end if
@@ -230,7 +253,7 @@ fn declare(inout cx: Cx, name: Str, t: Int, kind: Bind, at: Int)
   sc_put(inout cx, name, t, kind, cx.ast.nodes[at].line)
 end fn declare
 
-fn sc_put(inout cx: Cx, name: Str, t: Int, kind: Bind, line: Int)
+fn sc_put(inout cx: Cx, name: Str, t: TyId, kind: Bind, line: Int)
   let i = cx.sc_n
   if i < len(cx.sc_names) then
     cx.sc_names[i] = name
@@ -246,7 +269,7 @@ fn sc_put(inout cx: Cx, name: Str, t: Int, kind: Bind, line: Int)
   cx.sc_n = i + 1
 end fn sc_put
 
-fn begin_ctx(inout cx: Cx, f: Int, where: Str, with_effects: Bool)
+fn begin_ctx(inout cx: Cx, f: NodeId, where: Str, with_effects: Bool)
   cx.cur_fn = f
   cx.where = where
   cx.loops = 0
@@ -266,7 +289,7 @@ fn begin_ctx(inout cx: Cx, f: Int, where: Str, with_effects: Bool)
   cx.effs = effs
 end fn begin_ctx
 
-fn declare_params(inout cx: Cx, f: Int)
+fn declare_params(inout cx: Cx, f: NodeId)
   let ps = fn_params(cx.ast, f)
   for i in 0 ..< cnk(cx, ps) do
     let pn = ckid(cx, ps, i)
@@ -286,7 +309,7 @@ fn builtin_names() -> [Str]
   return ["print", "show", "len", "push", "pop", "array", "to_float", "to_int", "sqrt", "assert", "clock_ms", "byte_at", "slice", "from_byte", "join", "parse_float", "eprint", "args", "exit", "read_file", "write_file", "file_exists"]
 end fn builtin_names
 
-fn builtin_params(name: Str) -> [Int]
+fn builtin_params(name: Str) -> [TyId]
   if name == "print" or name == "eprint" or name == "from_byte" then
     if name == "from_byte" then
       return [T_INT]
@@ -323,7 +346,7 @@ fn builtin_params(name: Str) -> [Int]
   return []
 end fn builtin_params
 
-fn builtin_ret(name: Str) -> Int
+fn builtin_ret(name: Str) -> TyId
   if str_in(name, ["print", "eprint", "exit", "write_file", "push", "assert"]) then
     return T_UNIT
   end if
@@ -361,7 +384,7 @@ end fn is_special_builtin
 
 # ---------- places and copies ----------
 
-fn is_place(cx: Cx, e: Int) -> Bool
+fn is_place(cx: Cx, e: NodeId) -> Bool
   let k = nkind(cx, e)
   if k == NIdent then
     return true
@@ -372,7 +395,7 @@ fn is_place(cx: Cx, e: Int) -> Bool
   return false
 end fn is_place
 
-fn place_root(cx: Cx, e: Int) -> Int
+fn place_root(cx: Cx, e: NodeId) -> NodeId
   if nkind(cx, e) == NIdent then
     return e
   end if
@@ -383,18 +406,18 @@ fn mutable_kind(b: Bind) -> Bool
   return b == BVar or b == BInout
 end fn mutable_kind
 
-fn fresh(cx: Cx, e: Int) -> Bool
+fn fresh(cx: Cx, e: NodeId) -> Bool
   let k = nkind(cx, e)
   return cx.ast.nodes[e].copy or not needs_copy_any(cx, cx.ast.nodes[e].ty) or k == NArr or k == NRec or k == NCall
 end fn fresh
 
-fn escape(inout cx: Cx, e: Int)
+fn escape(inout cx: Cx, e: NodeId)
   if not fresh(cx, e) then
     cx.ast.nodes[e].copy_in = true
   end if
 end fn escape
 
-fn unwrap(cx: Cx, e: Int) -> Int
+fn unwrap(cx: Cx, e: NodeId) -> NodeId
   if nkind(cx, e) == NInout then
     return ckid(cx, e, 0)
   end if
@@ -403,7 +426,7 @@ end fn unwrap
 
 # ---------- effects ----------
 
-fn require_effect(inout cx: Cx, eff: Str, n: Int, desc: Str)
+fn require_effect(inout cx: Cx, eff: Str, n: NodeId, desc: Str)
   if eff == "" or str_in(eff, cx.effs) then
     return
   end if
@@ -423,7 +446,7 @@ end fn require_effect
 
 # ---------- expressions ----------
 
-fn expect_ty(inout cx: Cx, e: Int, t: Int, what: Str, mode: Mode) -> Int
+fn expect_ty(inout cx: Cx, e: NodeId, t: TyId, what: Str, mode: Mode) -> TyId
   let got = check_expr(inout cx, e, t, mode)
   if not ty_eq(got, t) then
     var hint = ""
@@ -433,6 +456,10 @@ fn expect_ty(inout cx: Cx, e: Int, t: Int, what: Str, mode: Mode) -> Int
       hint = "use to_int(...) (truncates toward zero)"
     else if t == T_STR and (got == T_INT or got == T_FLOAT or got == T_BOOL) then
       hint = "use show(...) to make a Str"
+    else if tk(cx, t) == YDist and ty_eq(got, base_of(cx, t)) then
+      hint = "wrap it: " ++ cx.tys[t].name ++ "(...)"
+    else if tk(cx, got) == YDist and ty_eq(base_of(cx, got), t) then
+      hint = "unwrap it with .value"
     end if
     err(inout cx, "type-mismatch", e, what ++ " has type " ++ ty_str(cx, got) ++ ", expected " ++ ty_str(cx, t), hint)
   end if
@@ -440,7 +467,7 @@ fn expect_ty(inout cx: Cx, e: Int, t: Int, what: Str, mode: Mode) -> Int
 end fn expect_ty
 
 # mode: MValue | MBorrow | MBase
-fn check_expr(inout cx: Cx, e: Int, expected: Int, mode: Mode) -> Int
+fn check_expr(inout cx: Cx, e: NodeId, expected: TyId, mode: Mode) -> TyId
   let t = check_inner(inout cx, e, expected)
   cx.ast.nodes[e].ty = t
   if mode == MValue and is_place(cx, e) then
@@ -452,7 +479,7 @@ fn check_expr(inout cx: Cx, e: Int, expected: Int, mode: Mode) -> Int
   return t
 end fn check_expr
 
-fn record_fields(cx: Cx, decl: Int) -> [Str]
+fn record_fields(cx: Cx, decl: NodeId) -> [Str]
   var out: [Str] = []
   for i in 0 ..< cnk(cx, decl) do
     push(out, nname(cx, ckid(cx, decl, i)))
@@ -460,16 +487,16 @@ fn record_fields(cx: Cx, decl: Int) -> [Str]
   return out
 end fn record_fields
 
-fn find_field(cx: Cx, decl: Int, name: Str) -> Int
+fn find_field(cx: Cx, decl: NodeId, name: Str) -> NodeId
   for i in 0 ..< cnk(cx, decl) do
     if nname(cx, ckid(cx, decl, i)) == name then
       return ckid(cx, decl, i)
     end if
   end for
-  return -1
+  return NO_NODE
 end fn find_field
 
-fn check_inner(inout cx: Cx, e: Int, expected: Int) -> Int
+fn check_inner(inout cx: Cx, e: NodeId, expected: TyId) -> TyId
   let k = nkind(cx, e)
   if k == NInt then
     return T_INT
@@ -488,7 +515,7 @@ fn check_inner(inout cx: Cx, e: Int, expected: Int) -> Int
   end if
   if k == NHole then
     let hname = nname(cx, e)
-    if expected < 0 then
+    if expected == NO_TY then
       err(inout cx, "hole-untyped", e, "can't tell what type hole ?" ++ hname ++ " should have", "give it context, e.g. 'let " ++ hname ++ ": Float = ?" ++ hname ++ "'")
       return T_ERR
     end if
@@ -519,8 +546,16 @@ fn check_inner(inout cx: Cx, e: Int, expected: Int) -> Int
     return check_arr(inout cx, e, expected)
   end if
   if k == NIndex then
-    let bt = check_expr(inout cx, ckid(cx, e, 0), -1, MBase)
-    let _ = expect_ty(inout cx, ckid(cx, e, 1), 1, "index", MValue)
+    let bt = check_expr(inout cx, ckid(cx, e, 0), NO_TY, MBase)
+    let ix = ckid(cx, e, 1)
+    let it = check_expr(inout cx, ix, T_INT, MValue)
+    if it != T_INT and it != T_ERR and not (tk(cx, it) == YDist and base_of(cx, it) == T_INT) then
+      var ihint = ""
+      if it == T_FLOAT then
+        ihint = "use to_int(...) (truncates toward zero)"
+      end if
+      err(inout cx, "type-mismatch", ix, "index has type " ++ ty_str(cx, it) ++ ", expected Int", ihint)
+    end if
     if bt == T_ERR then
       return T_ERR
     end if
@@ -535,7 +570,7 @@ fn check_inner(inout cx: Cx, e: Int, expected: Int) -> Int
   end if
   if k == NUn then
     if nname(cx, e) == "not" then
-      let _ = expect_ty(inout cx, ckid(cx, e, 0), 3, "operand of 'not'", MValue)
+      let _ = expect_ty(inout cx, ckid(cx, e, 0), T_BOOL, "operand of 'not'", MValue)
       return T_BOOL
     end if
     let t = check_expr(inout cx, ckid(cx, e, 0), expected, MValue)
@@ -550,7 +585,7 @@ fn check_inner(inout cx: Cx, e: Int, expected: Int) -> Int
   return T_ERR
 end fn check_inner
 
-fn check_ident(inout cx: Cx, e: Int) -> Int
+fn check_ident(inout cx: Cx, e: NodeId) -> TyId
   let name = nname(cx, e)
   let b = lookup(cx, name)
   if b >= 0 then
@@ -564,8 +599,8 @@ fn check_ident(inout cx: Cx, e: Int) -> Int
     end if
     return cx.sc_tys[b]
   end if
-  let v = map_get(cx.variants, name)
-  if v >= 0 then
+  let v = variant_decl(cx, name)
+  if v != NO_NODE then
     if cnk(cx, v) > 0 then
       err(inout cx, "arity", e, "variant " ++ name ++ " carries " ++ show(cnk(cx, v)) ++ " field(s); construct it as " ++ name ++ "(" ++ join(record_fields(cx, v), ", ") ++ ")", "")
       return T_ERR
@@ -594,10 +629,18 @@ fn check_ident(inout cx: Cx, e: Int) -> Int
   return T_ERR
 end fn check_ident
 
-fn check_field(inout cx: Cx, e: Int) -> Int
-  let bt = check_expr(inout cx, ckid(cx, e, 0), -1, MBase)
+fn check_field(inout cx: Cx, e: NodeId) -> TyId
+  let bt = check_expr(inout cx, ckid(cx, e, 0), NO_TY, MBase)
   if bt == T_ERR then
     return T_ERR
+  end if
+  if tk(cx, bt) == YDist then
+    if nname(cx, e) != "value" then
+      err(inout cx, "unknown-field", e, cx.tys[bt].name ++ " is a distinct " ++ ty_str(cx, base_of(cx, bt)) ++ "; its only field is .value", "")
+      return T_ERR
+    end if
+    cx.ast.nodes[e].what = RUnwrap
+    return base_of(cx, bt)
   end if
   if tk(cx, bt) != YRec then
     var hint = ""
@@ -607,10 +650,10 @@ fn check_field(inout cx: Cx, e: Int) -> Int
     err(inout cx, "type-mismatch", e, ty_str(cx, bt) ++ " has no fields", hint)
     return T_ERR
   end if
-  let decl = map_get(cx.types, cx.tys[bt].name)
+  let decl = type_decl(cx, cx.tys[bt].name)
   let fname = nname(cx, e)
   let fd = find_field(cx, decl, fname)
-  if fd < 0 then
+  if fd == NO_NODE then
     let s = suggest(fname, record_fields(cx, decl))
     err(inout cx, "unknown-field", e, "record " ++ cx.tys[bt].name ++ " has no field '" ++ fname ++ "'", did_you_mean(s, ""))
     return T_ERR
@@ -618,20 +661,20 @@ fn check_field(inout cx: Cx, e: Int) -> Int
   return cx.ast.nodes[fd].ty
 end fn check_field
 
-fn check_rec(inout cx: Cx, e: Int) -> Int
+fn check_rec(inout cx: Cx, e: NodeId) -> TyId
   let name = nname(cx, e)
-  let decl = map_get(cx.types, name)
-  if decl < 0 or nkind(cx, decl) != NRecord then
+  let decl = type_decl(cx, name)
+  if decl == NO_NODE or nkind(cx, decl) != NRecord then
     var recs: [Str] = []
     for tn in cx.types.keys do
-      if nkind(cx, map_get(cx.types, tn)) == NRecord then
+      if nkind(cx, type_decl(cx, tn)) == NRecord then
         push(recs, tn)
       end if
     end for
     let s = suggest(name, recs)
     err(inout cx, "unknown-type", e, "'" ++ name ++ "' is not a record type", did_you_mean(s, ""))
     for i in 0 ..< cnk(cx, e) do
-      let _ = check_expr(inout cx, ckid(cx, ckid(cx, e, i), 0), -1, MValue)
+      let _ = check_expr(inout cx, ckid(cx, ckid(cx, e, i), 0), NO_TY, MValue)
     end for
     return T_ERR
   end if
@@ -642,10 +685,10 @@ fn check_rec(inout cx: Cx, e: Int) -> Int
     let fname = nname(cx, fi)
     let val = ckid(cx, fi, 0)
     let fd = find_field(cx, decl, fname)
-    if fd < 0 then
+    if fd == NO_NODE then
       let s2 = suggest(fname, record_fields(cx, decl))
       err(inout cx, "unknown-field", fi, "record " ++ name ++ " has no field '" ++ fname ++ "'", did_you_mean(s2, "fields: " ++ join(record_fields(cx, decl), ", ")))
-      let _ = check_expr(inout cx, val, -1, MValue)
+      let _ = check_expr(inout cx, val, NO_TY, MValue)
     else
       if str_in(fname, given) then
         err(inout cx, "duplicate", fi, "field '" ++ fname ++ "' given twice", "")
@@ -664,24 +707,24 @@ fn check_rec(inout cx: Cx, e: Int) -> Int
   if len(missing) > 0 then
     err(inout cx, "missing-field", e, "record literal " ++ name ++ " is missing: " ++ join(missing, ", "), "every field must be given explicitly")
   end if
-  return intern(inout cx, YRec, name, -1)
+  return intern(inout cx, YRec, name, NO_TY)
 end fn check_rec
 
-fn check_arr(inout cx: Cx, e: Int, expected: Int) -> Int
-  var el = -1
-  if expected >= 0 and tk(cx, expected) == YArr then
+fn check_arr(inout cx: Cx, e: NodeId, expected: TyId) -> TyId
+  var el = NO_TY
+  if expected != NO_TY and tk(cx, expected) == YArr then
     el = cx.tys[expected].el
   end if
   let n = cnk(cx, e)
   if n == 0 then
-    if el < 0 then
+    if el == NO_TY then
       err(inout cx, "cannot-infer", e, "can't infer the element type of []", "annotate it, e.g. 'var xs: [Int] = []'")
       return T_ERR
     end if
     return intern(inout cx, YArr, "", el)
   end if
-  if el < 0 then
-    el = check_expr(inout cx, ckid(cx, e, 0), -1, MValue)
+  if el == NO_TY then
+    el = check_expr(inout cx, ckid(cx, e, 0), NO_TY, MValue)
   else
     let _ = expect_ty(inout cx, ckid(cx, e, 0), el, "array element", MValue)
   end if
@@ -701,7 +744,7 @@ fn is_arith(op: Str) -> Bool
   return op == "+" or op == "-" or op == "*" or op == "/" or op == "%"
 end fn is_arith
 
-fn check_bin(inout cx: Cx, e: Int, expected: Int) -> Int
+fn check_bin(inout cx: Cx, e: NodeId, expected: TyId) -> TyId
   let op = nname(cx, e)
   let l = ckid(cx, e, 0)
   let r = ckid(cx, e, 1)
@@ -715,17 +758,17 @@ fn check_bin(inout cx: Cx, e: Int, expected: Int) -> Int
     let _ = expect_ty(inout cx, r, T_STR, "right side of '++'", MValue)
     return T_STR
   end if
-  var hint_ty = -1
+  var hint_ty = NO_TY
   if expected == T_INT or expected == T_FLOAT then
     hint_ty = expected
   end if
   if op == "==" or op == "!=" then
-    hint_ty = -1
+    hint_ty = NO_TY
   end if
   let lt = check_expr(inout cx, l, hint_ty, MValue)
   var rexp = lt
   if lt == T_ERR then
-    rexp = -1
+    rexp = NO_TY
   end if
   let rt = check_expr(inout cx, r, rexp, MValue)
   if lt == T_ERR or rt == T_ERR then
@@ -750,6 +793,11 @@ fn check_bin(inout cx: Cx, e: Int, expected: Int) -> Int
     end if
     return T_BOOL
   end if
+  if tk(cx, lt) == YDist and is_arith(op) then
+    let dname = cx.tys[lt].name
+    err(inout cx, "type-mismatch", e, "'" ++ op ++ "' doesn't work on distinct type " ++ dname, "ids aren't numbers; if you mean it, unwrap and rewrap: " ++ dname ++ "(a.value " ++ op ++ " b.value)")
+    return lt
+  end if
   if op == "+" or op == "-" or op == "*" or op == "/" then
     if lt != T_INT and lt != T_FLOAT then
       var hint2 = ""
@@ -767,7 +815,7 @@ fn check_bin(inout cx: Cx, e: Int, expected: Int) -> Int
     return lt
   end if
   if op == "==" or op == "!=" then
-    if lt != T_INT and lt != T_FLOAT and lt != T_BOOL and lt != T_STR and not simple_enum(cx, lt) then
+    if lt != T_INT and lt != T_FLOAT and lt != T_BOOL and lt != T_STR and tk(cx, lt) != YDist and not simple_enum(cx, lt) then
       var hint3 = "compare the fields you care about"
       if tk(cx, lt) == YEnum then
         hint3 = cx.tys[lt].name ++ " has variants with payloads; use match to inspect them"
@@ -776,13 +824,14 @@ fn check_bin(inout cx: Cx, e: Int, expected: Int) -> Int
     end if
     return T_BOOL
   end if
-  if lt != T_INT and lt != T_FLOAT then
+  let lb = base_of(cx, lt)
+  if lb != T_INT and lb != T_FLOAT and lb != T_ERR then
     err(inout cx, "type-mismatch", e, "'" ++ op ++ "' orders Int or Float, not " ++ ty_str(cx, lt), "")
   end if
   return T_BOOL
 end fn check_bin
 
-fn arity_ok(inout cx: Cx, e: Int, want: Int) -> Bool
+fn arity_ok(inout cx: Cx, e: NodeId, want: Int) -> Bool
   let n = cnk(cx, e)
   if n != want then
     err(inout cx, "arity", e, nname(cx, e) ++ " takes " ++ show(want) ++ " argument(s), got " ++ show(n), "")
@@ -791,17 +840,17 @@ fn arity_ok(inout cx: Cx, e: Int, want: Int) -> Bool
   return true
 end fn arity_ok
 
-fn check_args_loose(inout cx: Cx, e: Int, mode: Mode)
+fn check_args_loose(inout cx: Cx, e: NodeId, mode: Mode)
   for i in 0 ..< cnk(cx, e) do
-    let _ = check_expr(inout cx, ckid(cx, e, i), -1, mode)
+    let _ = check_expr(inout cx, ckid(cx, e, i), NO_TY, mode)
   end for
 end fn check_args_loose
 
-fn check_call(inout cx: Cx, e: Int, expected: Int) -> Int
+fn check_call(inout cx: Cx, e: NodeId, expected: TyId) -> TyId
   let name = nname(cx, e)
   let n = cnk(cx, e)
-  let v = map_get(cx.variants, name)
-  if v >= 0 then
+  let v = variant_decl(cx, name)
+  if v != NO_NODE then
     cx.ast.nodes[e].ref = v
     cx.ast.nodes[e].what = RVariant
     check_visible(inout cx, e, v, name)
@@ -831,8 +880,19 @@ fn check_call(inout cx: Cx, e: Int, expected: Int) -> Int
     end if
     return check_special(inout cx, e, expected)
   end if
-  let f = map_get(cx.fns, name)
-  if f < 0 then
+  let dt = type_decl(cx, name)
+  if dt != NO_NODE and nkind(cx, dt) == NDistinct then
+    cx.ast.nodes[e].what = RWrap
+    check_visible(inout cx, e, dt, name)
+    if arity_ok(inout cx, e, 1) then
+      let _ = expect_ty(inout cx, ckid(cx, e, 0), cx.ast.nodes[dt].ty, "value wrapped in " ++ name, MValue)
+    else
+      check_args_loose(inout cx, e, MValue)
+    end if
+    return intern(inout cx, YDist, name, NO_TY)
+  end if
+  let f = fn_decl(cx, name)
+  if f == NO_NODE then
     var cands: [Str] = []
     for fk in cx.fns.keys do
       push(cands, fk)
@@ -876,7 +936,7 @@ fn check_call(inout cx: Cx, e: Int, expected: Int) -> Int
       if not marked then
         err(inout cx, "inout-mismatch", a, "parameter '" ++ pname ++ "' of " ++ name ++ " is inout; the call must say so", "write '" ++ name ++ "(..., inout " ++ src_of(cx, a) ++ ", ...)' so the mutation is visible here")
       end if
-      let t = check_expr(inout cx, a, -1, MBase)
+      let t = check_expr(inout cx, a, NO_TY, MBase)
       cx.ast.nodes[w].ty = t
       check_mutable_place(inout cx, a, "pass as inout")
       if not ty_eq(t, pty) then
@@ -910,15 +970,15 @@ fn check_call(inout cx: Cx, e: Int, expected: Int) -> Int
   return ret
 end fn check_call
 
-fn check_special(inout cx: Cx, e: Int, expected: Int) -> Int
+fn check_special(inout cx: Cx, e: NodeId, expected: TyId) -> TyId
   let name = nname(cx, e)
   if name == "show" then
     if not arity_ok(inout cx, e, 1) then
       return T_STR
     end if
-    let t = check_expr(inout cx, ckid(cx, e, 0), -1, MValue)
-    if t != T_INT and t != T_FLOAT and t != T_BOOL and t != T_STR and t != T_ERR and not simple_enum(cx, t) then
-      err(inout cx, "type-mismatch", e, "show works on Int, Float, Bool, Str and payload-free enums; not " ++ ty_str(cx, t), "write a describe function for your type")
+    let t = check_expr(inout cx, ckid(cx, e, 0), NO_TY, MValue)
+    if t != T_INT and t != T_FLOAT and t != T_BOOL and t != T_STR and t != T_ERR and tk(cx, t) != YDist and not simple_enum(cx, t) then
+      err(inout cx, "type-mismatch", e, "show works on Int, Float, Bool, Str, distinct types and payload-free enums; not " ++ ty_str(cx, t), "write a describe function for your type")
     end if
     return T_STR
   end if
@@ -926,7 +986,7 @@ fn check_special(inout cx: Cx, e: Int, expected: Int) -> Int
     if not arity_ok(inout cx, e, 1) then
       return T_INT
     end if
-    let t2 = check_expr(inout cx, ckid(cx, e, 0), -1, MBorrow)
+    let t2 = check_expr(inout cx, ckid(cx, e, 0), NO_TY, MBorrow)
     if tk(cx, t2) != YArr and t2 != T_STR and t2 != T_ERR then
       err(inout cx, "type-mismatch", e, "len works on arrays and Str, not " ++ ty_str(cx, t2), "")
     end if
@@ -938,10 +998,10 @@ fn check_special(inout cx: Cx, e: Int, expected: Int) -> Int
     end if
     let tgt = ckid(cx, e, 0)
     let val = ckid(cx, e, 1)
-    let t3 = check_expr(inout cx, tgt, -1, MBase)
+    let t3 = check_expr(inout cx, tgt, NO_TY, MBase)
     check_mutable_place(inout cx, tgt, "push to")
     if t3 == T_ERR then
-      let _ = check_expr(inout cx, val, -1, MValue)
+      let _ = check_expr(inout cx, val, NO_TY, MValue)
       return T_UNIT
     end if
     if tk(cx, t3) != YArr then
@@ -957,7 +1017,7 @@ fn check_special(inout cx: Cx, e: Int, expected: Int) -> Int
       return T_ERR
     end if
     let ptgt = ckid(cx, e, 0)
-    let pt = check_expr(inout cx, ptgt, -1, MBase)
+    let pt = check_expr(inout cx, ptgt, NO_TY, MBase)
     check_mutable_place(inout cx, ptgt, "pop from")
     if pt == T_ERR then
       return T_ERR
@@ -972,9 +1032,9 @@ fn check_special(inout cx: Cx, e: Int, expected: Int) -> Int
   if not arity_ok(inout cx, e, 2) then
     return T_ERR
   end if
-  let _ = expect_ty(inout cx, ckid(cx, e, 0), 1, "array length", MValue)
-  var hint_el = -1
-  if expected >= 0 and tk(cx, expected) == YArr then
+  let _ = expect_ty(inout cx, ckid(cx, e, 0), T_INT, "array length", MValue)
+  var hint_el = NO_TY
+  if expected != NO_TY and tk(cx, expected) == YArr then
     hint_el = cx.tys[expected].el
   end if
   let el = check_expr(inout cx, ckid(cx, e, 1), hint_el, MBorrow)
@@ -987,11 +1047,20 @@ fn check_special(inout cx: Cx, e: Int, expected: Int) -> Int
   return intern(inout cx, YArr, "", el)
 end fn check_special
 
-fn check_mutable_place(inout cx: Cx, tgt: Int, verb: Str)
+fn check_mutable_place(inout cx: Cx, tgt: NodeId, verb: Str)
   if not is_place(cx, tgt) then
     err(inout cx, "not-assignable", tgt, "can only " ++ verb ++ " a variable, field or element", "")
     return
   end if
+  var pl = tgt
+  while nkind(cx, pl) != NIdent do
+    if nkind(cx, pl) == NField and cx.ast.nodes[pl].what == RUnwrap then
+      let dn = cx.tys[cx.ast.nodes[ckid(cx, pl, 0)].ty].name
+      err(inout cx, "not-assignable", tgt, "the .value of a distinct type is read-only", "assign a whole new value instead, e.g. x = " ++ dn ++ "(...)")
+      return
+    end if
+    pl = ckid(cx, pl, 0)
+  end while
   let root = place_root(cx, tgt)
   let b = cx.ast.nodes[root].bind
   if b != BNone and not mutable_kind(b) then
@@ -1019,7 +1088,7 @@ end fn check_mutable_place
 
 # ---------- statements ----------
 
-fn has_break(cx: Cx, block: Int) -> Bool
+fn has_break(cx: Cx, block: NodeId) -> Bool
   for i in 0 ..< cnk(cx, block) do
     let s = ckid(cx, block, i)
     let k = nkind(cx, s)
@@ -1044,7 +1113,7 @@ fn has_break(cx: Cx, block: Int) -> Bool
   return false
 end fn has_break
 
-fn if_arms(cx: Cx, s: Int) -> Int
+fn if_arms(cx: Cx, s: NodeId) -> Int
   var n = cnk(cx, s)
   if cx.ast.nodes[s].flag then
     n = n - 1
@@ -1052,7 +1121,7 @@ fn if_arms(cx: Cx, s: Int) -> Int
   return n / 2
 end fn if_arms
 
-fn returns(cx: Cx, block: Int) -> Bool
+fn returns(cx: Cx, block: NodeId) -> Bool
   for i in 0 ..< cnk(cx, block) do
     let s = ckid(cx, block, i)
     let k = nkind(cx, s)
@@ -1091,7 +1160,7 @@ fn returns(cx: Cx, block: Int) -> Bool
   return false
 end fn returns
 
-fn check_block(inout cx: Cx, block: Int)
+fn check_block(inout cx: Cx, block: NodeId)
   sc_push(inout cx)
   for i in 0 ..< cnk(cx, block) do
     check_stmt(inout cx, ckid(cx, block, i))
@@ -1099,22 +1168,22 @@ fn check_block(inout cx: Cx, block: Int)
   sc_pop(inout cx)
 end fn check_block
 
-fn check_stmt(inout cx: Cx, s: Int)
+fn check_stmt(inout cx: Cx, s: NodeId)
   let k = nkind(cx, s)
   if k == NLet then
     let tyn = ckid(cx, s, 0)
     let init = ckid(cx, s, 1)
     let name = nname(cx, s)
     var t = T_ERR
-    if tyn >= 0 then
+    if tyn != NO_NODE then
       t = resolve_type(inout cx, tyn)
       if t != T_ERR then
         let _ = expect_ty(inout cx, init, t, "value of '" ++ name ++ "'", MValue)
       else
-        let _ = check_expr(inout cx, init, -1, MValue)
+        let _ = check_expr(inout cx, init, NO_TY, MValue)
       end if
     else
-      t = check_expr(inout cx, init, -1, MValue)
+      t = check_expr(inout cx, init, NO_TY, MValue)
     end if
     if t == T_UNIT then
       err(inout cx, "unit-value", s, "'" ++ name ++ "' would have type Unit", "call the function as a statement instead")
@@ -1134,12 +1203,12 @@ fn check_stmt(inout cx: Cx, s: Int)
   if k == NAssign then
     let target = ckid(cx, s, 0)
     let value = ckid(cx, s, 1)
-    let t2 = check_expr(inout cx, target, -1, MBase)
+    let t2 = check_expr(inout cx, target, NO_TY, MBase)
     check_mutable_place(inout cx, target, "assign to")
     if t2 != T_ERR then
       let _ = expect_ty(inout cx, value, t2, "assigned value", MValue)
     else
-      let _ = check_expr(inout cx, value, -1, MValue)
+      let _ = check_expr(inout cx, value, NO_TY, MValue)
     end if
     escape(inout cx, value)
     return
@@ -1151,7 +1220,7 @@ fn check_stmt(inout cx: Cx, s: Int)
       err(inout cx, "hole-untyped", x, "a hole can't stand alone as a statement", "use it where a value of known type is needed")
       return
     end if
-    let t3 = check_expr(inout cx, x, -1, MValue)
+    let t3 = check_expr(inout cx, x, NO_TY, MValue)
     if xk != NCall then
       var hint = ""
       if xk == NBin and nname(cx, x) == "==" then
@@ -1166,7 +1235,7 @@ fn check_stmt(inout cx: Cx, s: Int)
   end if
   if k == NIf then
     for a in 0 ..< if_arms(cx, s) do
-      let _ = expect_ty(inout cx, ckid(cx, s, a * 2), 3, "if condition", MValue)
+      let _ = expect_ty(inout cx, ckid(cx, s, a * 2), T_BOOL, "if condition", MValue)
       check_block(inout cx, ckid(cx, s, a * 2 + 1))
     end for
     if cx.ast.nodes[s].flag then
@@ -1175,7 +1244,7 @@ fn check_stmt(inout cx: Cx, s: Int)
     return
   end if
   if k == NWhile then
-    let _ = expect_ty(inout cx, ckid(cx, s, 0), 3, "while condition", MValue)
+    let _ = expect_ty(inout cx, ckid(cx, s, 0), T_BOOL, "while condition", MValue)
     cx.loops = cx.loops + 1
     check_block(inout cx, ckid(cx, s, 1))
     cx.loops = cx.loops - 1
@@ -1196,7 +1265,7 @@ fn check_stmt(inout cx: Cx, s: Int)
       let v = ckid(cx, s, 0)
       if rt == T_UNIT then
         err(inout cx, "type-mismatch", s, "fn " ++ fname ++ " returns Unit; it can't return a value", "add '-> Type' to the signature")
-        let _ = check_expr(inout cx, v, -1, MValue)
+        let _ = check_expr(inout cx, v, NO_TY, MValue)
       else
         let _ = expect_ty(inout cx, v, rt, "returned value", MValue)
         if nkind(cx, v) == NIdent and cx.ast.nodes[v].bind == BVar then
@@ -1218,17 +1287,17 @@ fn check_stmt(inout cx: Cx, s: Int)
   end if
 end fn check_stmt
 
-fn check_for(inout cx: Cx, s: Int)
+fn check_for(inout cx: Cx, s: NodeId)
   var t = T_ERR
-  var body = 0
+  var body = NO_NODE
   if cx.ast.nodes[s].ival == 1 then
-    let _ = expect_ty(inout cx, ckid(cx, s, 0), 1, "range start", MValue)
-    let _ = expect_ty(inout cx, ckid(cx, s, 1), 1, "range end", MValue)
+    let _ = expect_ty(inout cx, ckid(cx, s, 0), T_INT, "range start", MValue)
+    let _ = expect_ty(inout cx, ckid(cx, s, 1), T_INT, "range end", MValue)
     t = T_INT
     body = ckid(cx, s, 2)
   else
     let iter = ckid(cx, s, 0)
-    let it = check_expr(inout cx, iter, -1, MValue)
+    let it = check_expr(inout cx, iter, NO_TY, MValue)
     if tk(cx, it) != YArr and it != T_ERR then
       err(inout cx, "type-mismatch", iter, "can only loop over arrays or ranges, not " ++ ty_str(cx, it), "for a count, write 'for i in 0 ..< n do'")
     end if
@@ -1246,8 +1315,8 @@ fn check_for(inout cx: Cx, s: Int)
   sc_pop(inout cx)
 end fn check_for
 
-fn check_match(inout cx: Cx, s: Int)
-  let t = check_expr(inout cx, ckid(cx, s, 0), -1, MValue)
+fn check_match(inout cx: Cx, s: NodeId)
+  let t = check_expr(inout cx, ckid(cx, s, 0), NO_TY, MValue)
   let n = cnk(cx, s)
   if t == T_ERR then
     for i in 1 ..< n do
@@ -1260,7 +1329,7 @@ fn check_match(inout cx: Cx, s: Int)
     return
   end if
   let ename = cx.tys[t].name
-  let decl = map_get(cx.types, ename)
+  let decl = type_decl(cx, ename)
   var covered: [Str] = []
   var wild = false
   for i2 in 1 ..< n do
@@ -1273,8 +1342,8 @@ fn check_match(inout cx: Cx, s: Int)
     if cname == "_" then
       wild = true
     else
-      let v = map_get(cx.variants, cname)
-      if v < 0 or cx.ast.nodes[v].ref != decl then
+      let v = variant_decl(cx, cname)
+      if v == NO_NODE or cx.ast.nodes[v].ref != decl then
         let s2 = suggest(cname, record_fields(cx, decl))
         err(inout cx, "unknown-variant", c, ename ++ " has no variant '" ++ cname ++ "'", did_you_mean(s2, "variants: " ++ join(record_fields(cx, decl), ", ")))
       else
@@ -1310,7 +1379,7 @@ fn check_match(inout cx: Cx, s: Int)
   cx.ast.nodes[s].exh = wild or len(missing) == 0
   if not cx.ast.nodes[s].exh then
     var suffix = ""
-    if cnk(cx, map_get(cx.variants, missing[0])) > 0 then
+    if cnk(cx, variant_decl(cx, missing[0])) > 0 then
       suffix = "(...)"
     end if
     err(inout cx, "non-exhaustive", s, "match on " ++ ename ++ " is missing: " ++ join(missing, ", "), "add 'case " ++ missing[0] ++ suffix ++ "' or 'case _'")
@@ -1319,7 +1388,7 @@ end fn check_match
 
 # ---------- declarations ----------
 
-fn resolve_type(inout cx: Cx, n: Int) -> Int
+fn resolve_type(inout cx: Cx, n: NodeId) -> TyId
   let k = nkind(cx, n)
   if k == NTArr then
     let el = resolve_type(inout cx, ckid(cx, n, 0))
@@ -1341,8 +1410,8 @@ fn resolve_type(inout cx: Cx, n: Int) -> Int
     end if
     return T_UNIT
   end if
-  let d = map_get(cx.types, name)
-  if d < 0 then
+  let d = type_decl(cx, name)
+  if d == NO_NODE then
     var cands: [Str] = []
     for tn in cx.types.keys do
       push(cands, tn)
@@ -1355,12 +1424,15 @@ fn resolve_type(inout cx: Cx, n: Int) -> Int
   end if
   check_visible(inout cx, n, d, name)
   if nkind(cx, d) == NRecord then
-    return intern(inout cx, YRec, name, -1)
+    return intern(inout cx, YRec, name, NO_TY)
   end if
-  return intern(inout cx, YEnum, name, -1)
+  if nkind(cx, d) == NDistinct then
+    return intern(inout cx, YDist, name, NO_TY)
+  end if
+  return intern(inout cx, YEnum, name, NO_TY)
 end fn resolve_type
 
-fn resolve_fields(inout cx: Cx, owner: Int, what: Str)
+fn resolve_fields(inout cx: Cx, owner: NodeId, what: Str)
   var seen: [Str] = []
   for i in 0 ..< cnk(cx, owner) do
     let f = ckid(cx, owner, i)
@@ -1383,7 +1455,7 @@ fn rec_cycle(cx: Cx, name: Str, path: [Str]) -> [Str]
     push(found_path, name)
     return found_path
   end if
-  let td = map_get(cx.types, name)
+  let td = type_decl(cx, name)
   for i in 0 ..< cnk(cx, td) do
     let ft = cx.ast.nodes[ckid(cx, td, i)].ty
     if tk(cx, ft) == YRec then
@@ -1398,34 +1470,41 @@ fn rec_cycle(cx: Cx, name: Str, path: [Str]) -> [Str]
   return []
 end fn rec_cycle
 
-fn check_program(inout cx: Cx, prog: Int)
+fn check_program(inout cx: Cx, prog: NodeId)
   # types
   for i in 0 ..< cnk(cx, prog) do
     let d = ckid(cx, prog, i)
     let dk = nkind(cx, d)
-    if dk == NRecord or dk == NEnum then
+    if dk == NRecord or dk == NEnum or dk == NDistinct then
       let name = nname(cx, d)
       if map_has(cx.types, name) or str_in(name, ["Int", "Float", "Bool", "Str", "Unit"]) then
-        err(inout cx, "duplicate", d, "type '" ++ name ++ "' is already defined" ++ elsewhere(cx, map_get(cx.types, name), d), "")
+        err(inout cx, "duplicate", d, "type '" ++ name ++ "' is already defined" ++ elsewhere(cx, type_decl(cx, name), d), "")
       else
-        map_set(inout cx.types, name, d)
+        map_set(inout cx.types, name, d.value)
       end if
     end if
   end for
   for tname in cx.types.keys do
-    let td = map_get(cx.types, tname)
-    if nkind(cx, td) == NRecord then
+    let td = type_decl(cx, tname)
+    if nkind(cx, td) == NDistinct then
+      var bt = resolve_type(inout cx, ckid(cx, td, 0))
+      if bt != T_INT and bt != T_FLOAT and bt != T_STR and bt != T_BOOL and bt != T_ERR then
+        err(inout cx, "bad-distinct", td, "distinct types wrap Int, Float, Str or Bool, not " ++ ty_str(cx, bt), "use a record to wrap anything else")
+        bt = T_ERR
+      end if
+      cx.ast.nodes[td].ty = bt
+    else if nkind(cx, td) == NRecord then
       resolve_fields(inout cx, td, "record " ++ tname)
     else
-      let et = intern(inout cx, YEnum, tname, -1)
+      let et = intern(inout cx, YEnum, tname, NO_TY)
       for vi in 0 ..< cnk(cx, td) do
         let v = ckid(cx, td, vi)
         let vname = nname(cx, v)
         if map_has(cx.variants, vname) then
-          let other = cx.ast.nodes[map_get(cx.variants, vname)].ref
+          let other = cx.ast.nodes[variant_decl(cx, vname)].ref
           err(inout cx, "duplicate", v, "variant '" ++ vname ++ "' is already defined in enum " ++ nname(cx, other), "variant names are global so that `case Foo` is never ambiguous")
         else
-          map_set(inout cx.variants, vname, v)
+          map_set(inout cx.variants, vname, v.value)
         end if
         cx.ast.nodes[v].ival = vi
         cx.ast.nodes[v].ref = td
@@ -1435,7 +1514,7 @@ fn check_program(inout cx: Cx, prog: Int)
     end if
   end for
   for tname2 in cx.types.keys do
-    let td2 = map_get(cx.types, tname2)
+    let td2 = type_decl(cx, tname2)
     if nkind(cx, td2) == NRecord then
       let c = rec_cycle(cx, tname2, [])
       if len(c) > 0 and c[0] == tname2 then
@@ -1450,8 +1529,8 @@ fn check_program(inout cx: Cx, prog: Int)
       check_signature(inout cx, f)
     end if
   end for
-  let main = map_get(cx.fns, "main")
-  if main >= 0 then
+  let main = fn_decl(cx, "main")
+  if main != NO_NODE then
     if cnk(cx, fn_params(cx.ast, main)) > 0 or cx.ast.nodes[main].ty != T_UNIT then
       err(inout cx, "bad-main", main, "'main' must take no parameters and return Unit", "")
     end if
@@ -1473,11 +1552,11 @@ fn check_program(inout cx: Cx, prog: Int)
   sort_diags(inout cx)
 end fn check_program
 
-fn check_const(inout cx: Cx, c: Int)
+fn check_const(inout cx: Cx, c: NodeId)
   let name = nname(cx, c)
   let dup = str_in(name, cx.const_names)
   if dup then
-    var first = -1
+    var first = NO_NODE
     for ci in 0 ..< len(cx.const_names) do
       if cx.const_names[ci] == name then
         first = cx.const_decls[ci]
@@ -1497,7 +1576,7 @@ fn check_const(inout cx: Cx, c: Int)
   if t != T_ERR then
     let _ = expect_ty(inout cx, init, t, "value of '" ++ name ++ "'", MValue)
   else
-    let _ = check_expr(inout cx, init, -1, MValue)
+    let _ = check_expr(inout cx, init, NO_TY, MValue)
   end if
   if not dup then
     push(cx.const_names, name)
@@ -1507,14 +1586,14 @@ fn check_const(inout cx: Cx, c: Int)
   end if
 end fn check_const
 
-fn check_signature(inout cx: Cx, f: Int)
+fn check_signature(inout cx: Cx, f: NodeId)
   let name = nname(cx, f)
   if map_has(cx.fns, name) or str_in(name, builtin_names()) then
     var sfx = ""
     if str_in(name, builtin_names()) then
       sfx = " (built-in)"
     else
-      sfx = elsewhere(cx, map_get(cx.fns, name), f)
+      sfx = elsewhere(cx, fn_decl(cx, name), f)
     end if
     err(inout cx, "duplicate", f, "function '" ++ name ++ "' is already defined" ++ sfx, "")
     return
@@ -1522,7 +1601,11 @@ fn check_signature(inout cx: Cx, f: Int)
   if map_has(cx.variants, name) then
     err(inout cx, "duplicate", f, "'" ++ name ++ "' is already an enum variant", "")
   end if
-  map_set(inout cx.fns, name, f)
+  let td = type_decl(cx, name)
+  if td != NO_NODE and nkind(cx, td) == NDistinct then
+    err(inout cx, "duplicate", f, "'" ++ name ++ "' is already a distinct type", "")
+  end if
+  map_set(inout cx.fns, name, f.value)
   push(cx.fn_list, f)
   let ps = fn_params(cx.ast, f)
   var seen: [Str] = []
@@ -1549,13 +1632,13 @@ fn check_signature(inout cx: Cx, f: Int)
   end for
   let rn = fn_ret(cx.ast, f)
   var ret = T_UNIT
-  if rn >= 0 then
+  if rn != NO_NODE then
     ret = resolve_type(inout cx, rn)
   end if
   cx.ast.nodes[f].ty = ret
 end fn check_signature
 
-fn check_fn_body(inout cx: Cx, f: Int)
+fn check_fn_body(inout cx: Cx, f: NodeId)
   let name = nname(cx, f)
   let ret = cx.ast.nodes[f].ty
   begin_ctx(inout cx, f, "body", true)
@@ -1569,7 +1652,7 @@ fn check_fn_body(inout cx: Cx, f: Int)
   for i in 0 ..< cnk(cx, rq) do
     begin_ctx(inout cx, f, "requires", false)
     declare_params(inout cx, f)
-    let _ = expect_ty(inout cx, ckid(cx, rq, i), 3, "requires clause", MValue)
+    let _ = expect_ty(inout cx, ckid(cx, rq, i), T_BOOL, "requires clause", MValue)
   end for
   let es = fn_ensures(cx.ast, f)
   for j in 0 ..< cnk(cx, es) do
@@ -1584,7 +1667,7 @@ fn check_fn_body(inout cx: Cx, f: Int)
   let xs = fn_examples(cx.ast, f)
   for k in 0 ..< cnk(cx, xs) do
     begin_ctx(inout cx, f, "example", false)
-    let _ = expect_ty(inout cx, ckid(cx, xs, k), 3, "example", MValue)
+    let _ = expect_ty(inout cx, ckid(cx, xs, k), T_BOOL, "example", MValue)
   end for
 end fn check_fn_body
 

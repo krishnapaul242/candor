@@ -29,7 +29,7 @@ fn new_tmp(inout g: G) -> Str
   return "_t" ++ show(n)
 end fn new_tmp
 
-fn ctype(cx: Cx, t: Int) -> Str
+fn ctype(cx: Cx, t: TyId) -> Str
   match cx.tys[t].k
     case YInt
       return "int64_t"
@@ -47,12 +47,14 @@ fn ctype(cx: Cx, t: Int) -> Str
       return "R_" ++ cx.tys[t].name
     case YEnum
       return "E_" ++ cx.tys[t].name ++ "*"
+    case YDist
+      return ctype(cx, base_of(cx, t))
     case YErr
       return "/* error type */ void"
   end match
 end fn ctype
 
-fn mangle(cx: Cx, t: Int) -> Str
+fn mangle(cx: Cx, t: TyId) -> Str
   match cx.tys[t].k
     case YArr
       return "A_" ++ mangle(cx, cx.tys[t].el)
@@ -60,16 +62,18 @@ fn mangle(cx: Cx, t: Int) -> Str
       return "R_" ++ cx.tys[t].name
     case YEnum
       return "E_" ++ cx.tys[t].name
+    case YDist
+      return "D_" ++ cx.tys[t].name
     case _
       return lower(slice(ty_str(cx, t), 0, 1))
   end match
 end fn mangle
 
-fn rec_decl(cx: Cx, t: Int) -> Int
-  return map_get(cx.types, cx.tys[t].name)
+fn rec_decl(cx: Cx, t: TyId) -> NodeId
+  return type_decl(cx, cx.tys[t].name)
 end fn rec_decl
 
-fn needs_copy_c(cx: Cx, t: Int) -> Bool
+fn needs_copy_c(cx: Cx, t: TyId) -> Bool
   let k = tk(cx, t)
   if k == YArr then
     return true
@@ -85,7 +89,7 @@ fn needs_copy_c(cx: Cx, t: Int) -> Bool
   return false
 end fn needs_copy_c
 
-fn copy_fn(inout g: G, cx: Cx, t: Int) -> Str
+fn copy_fn(inout g: G, cx: Cx, t: TyId) -> Str
   let name = "cp_" ++ mangle(cx, t)
   if str_in(name, g.copy_names) then
     return name
@@ -139,15 +143,15 @@ fn c_str(s: Str) -> Str
 end fn c_str
 
 # fname is a trap label like "parse at parser.cnd"; the runtime appends ":line"
-fn loc(cx: Cx, fname: Str, e: Int) -> Str
+fn loc(cx: Cx, fname: Str, e: NodeId) -> Str
   return c_str(fname) ++ ", " ++ show(cx.ast.nodes[e].line)
 end fn loc
 
-fn copies(cx: Cx, e: Int) -> Bool
+fn copies(cx: Cx, e: NodeId) -> Bool
   return (cx.ast.nodes[e].copy or cx.ast.nodes[e].copy_in) and needs_copy_c(cx, cx.ast.nodes[e].ty)
 end fn copies
 
-fn simple(cx: Cx, e: Int) -> Bool
+fn simple(cx: Cx, e: NodeId) -> Bool
   let k = nkind(cx, e)
   if k == NInt or k == NFloat or k == NStr or k == NBool then
     return true
@@ -162,7 +166,7 @@ fn simple(cx: Cx, e: Int) -> Bool
 end fn simple
 
 # Evaluate `nodes` (already generated as `codes`) strictly left to right.
-fn seq_parts(inout g: G, cx: Cx, nodes: [Int], codes: [Str]) -> Seq
+fn seq_parts(inout g: G, cx: Cx, nodes: [NodeId], codes: [Str]) -> Seq
   var complex = 0
   for n in nodes do
     if not simple(cx, n) then
@@ -193,7 +197,7 @@ fn seq_wrap(s: Seq, body: Str) -> Str
   return "({ " ++ s.pre ++ " " ++ body ++ "; })"
 end fn seq_wrap
 
-fn gen_list(inout g: G, cx: Cx, nodes: [Int], fname: Str) -> [Str]
+fn gen_list(inout g: G, cx: Cx, nodes: [NodeId], fname: Str) -> [Str]
   var out: [Str] = []
   for n in nodes do
     push(out, gx(inout g, cx, n, fname))
@@ -201,15 +205,15 @@ fn gen_list(inout g: G, cx: Cx, nodes: [Int], fname: Str) -> [Str]
   return out
 end fn gen_list
 
-fn kid_list(cx: Cx, e: Int) -> [Int]
-  var out: [Int] = []
+fn kid_list(cx: Cx, e: NodeId) -> [NodeId]
+  var out: [NodeId] = []
   for i in 0 ..< cnk(cx, e) do
     push(out, ckid(cx, e, i))
   end for
   return out
 end fn kid_list
 
-fn gx(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+fn gx(inout g: G, cx: Cx, e: NodeId, fname: Str) -> Str
   let s = gx_inner(inout g, cx, e, fname)
   if copies(cx, e) then
     let cf = copy_fn(inout g, cx, cx.ast.nodes[e].ty)
@@ -218,7 +222,7 @@ fn gx(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
   return s
 end fn gx
 
-fn gx_inner(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+fn gx_inner(inout g: G, cx: Cx, e: NodeId, fname: Str) -> Str
   let k = nkind(cx, e)
   if k == NInt then
     return "INT64_C(" ++ show(cx.ast.nodes[e].ival) ++ ")"
@@ -259,7 +263,7 @@ fn gx_inner(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
     return gx(inout g, cx, ckid(cx, e, 0), fname)
   end if
   if k == NRec then
-    var vals: [Int] = []
+    var vals: [NodeId] = []
     for i in 0 ..< cnk(cx, e) do
       push(vals, ckid(cx, ckid(cx, e, i), 0))
     end for
@@ -297,6 +301,9 @@ fn gx_inner(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
     return "({ cn_arr* " ++ ta ++ " = " ++ bc ++ "; int64_t " ++ ti ++ " = cn_at(" ++ ta ++ ", " ++ ic2 ++ ", " ++ loc(cx, fname, e) ++ "); ((" ++ et2 ++ "*)" ++ ta ++ "->data)[" ++ ti ++ "]; })"
   end if
   if k == NField then
+    if cx.ast.nodes[e].what == RUnwrap then
+      return "(" ++ gx(inout g, cx, ckid(cx, e, 0), fname) ++ ")"
+    end if
     return "(" ++ gx(inout g, cx, ckid(cx, e, 0), fname) ++ ").f_" ++ nname(cx, e)
   end if
   if k == NUn then
@@ -315,7 +322,7 @@ fn gx_inner(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
   return "/* ? " ++ show(k) ++ " */"
 end fn gx_inner
 
-fn gx_bin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+fn gx_bin(inout g: G, cx: Cx, e: NodeId, fname: Str) -> Str
   let op = nname(cx, e)
   let l = ckid(cx, e, 0)
   let r = ckid(cx, e, 1)
@@ -328,7 +335,7 @@ fn gx_bin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
     end if
     return "(" ++ lc ++ cop ++ rc ++ ")"
   end if
-  let lt = cx.ast.nodes[l].ty
+  let lt = base_of(cx, cx.ast.nodes[l].ty)
   let codes = gen_list(inout g, cx, [l, r], fname)
   let sq = seq_parts(inout g, cx, [l, r], codes)
   let a = sq.vals[0]
@@ -358,7 +365,7 @@ fn gx_bin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
   return seq_wrap(sq, "cn_ovf(" ++ a ++ " " ++ op ++ " " ++ b ++ ", " ++ loc(cx, fname, e) ++ ")")
 end fn gx_bin
 
-fn gx_call(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+fn gx_call(inout g: G, cx: Cx, e: NodeId, fname: Str) -> Str
   let name = nname(cx, e)
   let what = cx.ast.nodes[e].what
   let args = kid_list(cx, e)
@@ -369,6 +376,9 @@ fn gx_call(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
     let codes = gen_list(inout g, cx, args, fname)
     let sq = seq_parts(inout g, cx, args, codes)
     return seq_wrap(sq, "mk_" ++ name ++ "(" ++ join(sq.vals, ", ") ++ ")")
+  end if
+  if what == RWrap then
+    return gx(inout g, cx, args[0], fname)
   end if
   if what == RBuiltin then
     return gx_builtin(inout g, cx, e, fname)
@@ -406,7 +416,7 @@ fn gx_call(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
   return seq_wrap(sq2, "f_" ++ name ++ "(" ++ join(sq2.vals, ", ") ++ ")")
 end fn gx_call
 
-fn gx_builtin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+fn gx_builtin(inout g: G, cx: Cx, e: NodeId, fname: Str) -> Str
   let name = nname(cx, e)
   let args = kid_list(cx, e)
   if name == "push" then
@@ -456,7 +466,7 @@ fn gx_builtin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
     return "cn_print(" ++ codes[0] ++ ")"
   end if
   if name == "show" then
-    let at = cx.ast.nodes[args[0]].ty
+    let at = base_of(cx, cx.ast.nodes[args[0]].ty)
     if tk(cx, at) == YEnum then
       return "cn_names_" ++ cx.tys[at].name ++ "[(" ++ codes[0] ++ ")->tag]"
     end if
@@ -523,7 +533,7 @@ fn gx_builtin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
 end fn gx_builtin
 
 # place -> statements to run first + an lvalue
-fn place(inout g: G, cx: Cx, e: Int, fname: Str) -> Place
+fn place(inout g: G, cx: Cx, e: NodeId, fname: Str) -> Place
   let k = nkind(cx, e)
   if k == NIdent then
     if cx.ast.nodes[e].bind == BInout then
@@ -547,7 +557,7 @@ end fn place
 
 # ---------- statements ----------
 
-fn gen_block(inout g: G, cx: Cx, block: Int, fname: Str, ind: Int) -> Str
+fn gen_block(inout g: G, cx: Cx, block: NodeId, fname: Str, ind: Int) -> Str
   var out: [Str] = []
   for i in 0 ..< cnk(cx, block) do
     push(out, gen_stmt(inout g, cx, ckid(cx, block, i), fname, ind))
@@ -555,7 +565,7 @@ fn gen_block(inout g: G, cx: Cx, block: Int, fname: Str, ind: Int) -> Str
   return join(out, "")
 end fn gen_block
 
-fn gen_stmt(inout g: G, cx: Cx, s: Int, fname: Str, ind: Int) -> Str
+fn gen_stmt(inout g: G, cx: Cx, s: NodeId, fname: Str, ind: Int) -> Str
   let pad = repeat_str("  ", ind)
   let k = nkind(cx, s)
   if k == NLet then
@@ -632,7 +642,7 @@ fn gen_stmt(inout g: G, cx: Cx, s: Int, fname: Str, ind: Int) -> Str
   return pad ++ "continue;\n"
 end fn gen_stmt
 
-fn gen_match(inout g: G, cx: Cx, s: Int, fname: Str, ind: Int) -> Str
+fn gen_match(inout g: G, cx: Cx, s: NodeId, fname: Str, ind: Int) -> Str
   let pad = repeat_str("  ", ind)
   let m = new_tmp(inout g)
   let scrut = ckid(cx, s, 0)
@@ -685,7 +695,7 @@ fn emit_record(cx: Cx, name: Str, inout done: [Str], inout out: [Str])
     return
   end if
   push(done, name)
-  let d = map_get(cx.types, name)
+  let d = type_decl(cx, name)
   var fields: [Str] = []
   for i in 0 ..< cnk(cx, d) do
     let f = ckid(cx, d, i)
@@ -702,20 +712,22 @@ fn gen_program(cx: Cx) -> Str
   var g = G { tmp: 0, copy_names: [], copy_protos: [], copy_bodies: [] }
   var head = ["#include \"candor_rt.h\""]
   for tname in cx.types.keys do
-    if nkind(cx, map_get(cx.types, tname)) == NRecord then
+    if nkind(cx, type_decl(cx, tname)) == NRecord then
       push(head, "typedef struct R_" ++ tname ++ " R_" ++ tname ++ ";")
+    else if nkind(cx, type_decl(cx, tname)) == NDistinct then
+      continue
     else
       push(head, "typedef struct E_" ++ tname ++ " E_" ++ tname ++ ";")
     end if
   end for
   var done: [Str] = []
   for tname2 in cx.types.keys do
-    if nkind(cx, map_get(cx.types, tname2)) == NRecord then
+    if nkind(cx, type_decl(cx, tname2)) == NRecord then
       emit_record(cx, tname2, inout done, inout head)
     end if
   end for
   for tname3 in cx.types.keys do
-    let td = map_get(cx.types, tname3)
+    let td = type_decl(cx, tname3)
     if nkind(cx, td) == NEnum then
       var members: [Str] = []
       for vi in 0 ..< cnk(cx, td) do
@@ -790,11 +802,11 @@ fn gen_program(cx: Cx) -> Str
   return join(out, "\n") ++ "\n"
 end fn gen_program
 
-fn trap_label(cx: Cx, n: Int) -> Str
+fn trap_label(cx: Cx, n: NodeId) -> Str
   return nname(cx, n) ++ " at " ++ base_name(cx.files[cx.ast.nodes[n].file])
 end fn trap_label
 
-fn gen_fn(inout g: G, cx: Cx, f: Int, inout protos: [Str], inout bodies: [Str])
+fn gen_fn(inout g: G, cx: Cx, f: NodeId, inout protos: [Str], inout bodies: [Str])
   let name = nname(cx, f)
   let lab = trap_label(cx, f)
   let rt = ctype(cx, cx.ast.nodes[f].ty)

@@ -1,0 +1,20 @@
+fn transpose(m: [[Int]]) -> [[Int]]
+  var out: [[Int]] = []
+  if len(m) == 0 then
+    return out
+  end if
+  let rows = len(m)
+  let cols = len(m[0])
+  var c = 0
+  while c < cols do
+    var row: [Int] = []
+    var r = 0
+    while r < rows do
+      push(row, m[r][c])
+      r = r + 1
+    end while
+    push(out, row)
+    c = c + 1
+  end while
+  return out
+end fn transpose
