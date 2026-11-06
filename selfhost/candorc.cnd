@@ -86,7 +86,25 @@ fn render_diag(d: Diag, ld: Loader) -> Str
   let lines = split_lines(ld.srcs[d.file])
   var s = "error[" ++ d.code ++ "] " ++ ld.paths[d.file] ++ ":" ++ show(d.line) ++ ":" ++ show(d.col) ++ "\n  " ++ d.msg ++ "\n"
   if d.line >= 1 and d.line <= len(lines) then
-    s = s ++ "   " ++ pad_left(show(d.line), 4) ++ " | " ++ lines[d.line - 1] ++ "\n          " ++ repeat_str(" ", max_int(0, d.col - 1)) ++ "^\n"
+    # Diagnostics often go straight back into a model's context: keep them short.
+    let ln = lines[d.line - 1]
+    var shown = ln
+    var caret = d.col
+    if len(ln) > 160 then
+      let start = max_int(0, d.col - 61)
+      let stop = min_int(len(ln), start + 120)
+      shown = slice(ln, start, stop)
+      if start > 0 then
+        shown = "..." ++ shown
+        caret = d.col - start + 3
+      else
+        caret = d.col - start
+      end if
+      if stop < len(ln) then
+        shown = shown ++ "..."
+      end if
+    end if
+    s = s ++ "   " ++ pad_left(show(d.line), 4) ++ " | " ++ shown ++ "\n          " ++ repeat_str(" ", max_int(0, caret - 1)) ++ "^\n"
   end if
   if d.hint != "" then
     s = s ++ "  hint: " ++ d.hint ++ "\n"

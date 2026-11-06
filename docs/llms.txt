@@ -67,7 +67,7 @@ let _ = some_fn()       # discard a non-Unit result explicitly
 
 - Arithmetic `+ - * / %` need both sides to have the SAME type (Int with Int, Float with Float). `%` is Int only.
 - Strings join with `++` (not `+`): `"n = " ++ show(n)`. There is no string interpolation.
-- Comparison: `== !=` on Int, Float, Bool, Str and payload-free enums. `< <= > >=` on Int and Float only. Comparisons don't chain: write `a < b and b < c`.
+- Comparison: `== !=` on Int, Float, Bool, Str, distinct types, payload-free enums, AND arrays and records made of those. Equality is structural (same length and equal elements, or equal fields), so `example parse("1,2") == [1, 2]` works. Enums with payloads can't be compared; use `match`. `< <= > >=` work on Int and Float only. Comparisons don't chain: write `a < b and b < c`.
 - Logic: `and`, `or`, `not` (NOT `&&`, `||`, `!`).
 - Unary minus: `-x`.
 - Precedence, low to high: `or` < `and` < `not` < comparison < `+ - ++` < `* / %` < unary `-` < postfix (`a[i]`, `r.f`, calls).
@@ -196,7 +196,7 @@ end fn area
 - Variant names are GLOBAL: two enums can't share a variant name, and a variant can't share a name with a function.
 - `match` must cover every variant, or end with `case _`. Patterns bind payload fields by position: `case Rect(w, _)`. There are no guards, no nested patterns and no literal patterns.
 - Payloads can be read ONLY through `match` (`s.radius` is wrong).
-- Payload-free enums (every variant has no data) support `==`, `!=` and `show(x)`, which gives the variant name.
+- Payload-free enums (every variant has no data) support `==`, `!=` and `show(x)`, which gives the variant name. Enums with payloads support neither, and neither do arrays or records containing them.
 - Enums can be recursive: `Cons(head: Int, tail: List)`.
 
 ## 10. Arrays and strings
@@ -380,8 +380,10 @@ end fn main
 ```
 node src/cli.js check FILE [--json]   # errors: error[CODE] FILE:LINE:COL, message, hint
 node src/cli.js run FILE              # run immediately
-node src/cli.js test FILE             # run all `example` clauses
+node src/cli.js test FILE             # run all `example` clauses (shows left/right values on failure)
 node src/cli.js build FILE -o OUT     # native binary via C
 ```
+
+Write `example` clauses for the edge cases in the task (empty input, negative numbers, ties); `candor test` checks them, and a failing example tells you exactly what's wrong.
 
 Every error has a stable code (`type-mismatch`, `unknown-name`, `effect-missing`, `immutable`, `inout-mismatch`, `non-exhaustive`, `missing-return`, `unused-value`, `shadowing`, `not-imported`, `syntax`, `end-label-mismatch`, ...). The `hint` line is usually the exact edit to make.

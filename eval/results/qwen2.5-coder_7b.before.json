@@ -1,0 +1,158 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "maxRounds": 3,
+  "date": "2026-11-06T12:16:55.852Z",
+  "tasks": {
+    "fizzbuzz": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 140,
+          "seconds": 6
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "top_word": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 362,
+          "seconds": 16
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "stack_machine": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 198,
+          "seconds": 9
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "bank": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 115,
+          "seconds": 6
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "transpose": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 111,
+          "seconds": 5
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "find": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 167,
+          "seconds": 8
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "lookup": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 83,
+          "seconds": 4
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "csv": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 375,
+          "seconds": 17
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 378,
+          "seconds": 21
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 378,
+          "seconds": 28
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 378,
+          "seconds": 31
+        }
+      ],
+      "compiledAtRound": -1
+    },
+    "summary": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "effect-missing"
+          ],
+          "tokens": 181,
+          "seconds": 15
+        },
+        {
+          "round": 1,
+          "ok": true,
+          "codes": [],
+          "tokens": 185,
+          "seconds": 15
+        }
+      ],
+      "compiledAtRound": 1
+    }
+  }
+}

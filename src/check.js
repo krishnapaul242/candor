@@ -82,7 +82,8 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
 
   // ---- types ----
   for (const td of program.types) {
-    if (types.has(td.name) || PRIMS[td.name]) { err('duplicate', td, `type '${td.name}' is already defined${elsewhere(types.get(td.name), td)}`); continue; }
+    if (types.has(td.name) || PRIMS[td.name]) { err('duplicate', td, `type '${td.name}' is already defined${elsewhere(types.get(td.name), td)}`,
+      PRIMS[td.name] ? `${td.name} is a built-in type; delete this declaration and use ${td.name} directly` : undefined); continue; }
     types.set(td.name, td);
   }
   const resolveType = (te) => {
@@ -181,6 +182,9 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
   // ---- bodies ----
   // A payload-free enum is a plain tag, so == and show are meaningful for it.
   const simpleEnum = (t) => t.k === 'Enum' && types.get(t.name).variants.every((v) => !v.fields.length);
+  // == / != work on scalars, distinct types, payload-free enums, and arrays/records built from them.
+  const comparable = (t) => ['Int', 'Float', 'Bool', 'Str', 'Dist', 'Err'].includes(t.k) || simpleEnum(t) ||
+    (t.k === 'Arr' && comparable(t.el)) || (t.k === 'Rec' && types.get(t.name).fields.every((f) => comparable(f.t)));
   const isPlace = (e) => e.e === 'ident' || ((e.e === 'index' || e.e === 'field') && isPlace(e.base));
   const placeRoot = (e) => e.e === 'ident' ? e : placeRoot(e.base);
   const needsCopyAny = (t) => t.k === 'Arr' || t.k === 'Rec';
@@ -353,7 +357,11 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
           err('type-mismatch', e.idx, `index has type ${tyStr(it)}, expected Int`, it.k === 'Float' ? 'use to_int(...) (truncates toward zero)' : undefined);
         }
         if (bt.k === 'Err') return ERR;
-        if (bt.k !== 'Arr') { err('type-mismatch', e, `can only index arrays, not ${tyStr(bt)}`); return ERR; }
+        if (bt.k !== 'Arr') {
+          err('type-mismatch', e, `can only index arrays, not ${tyStr(bt)}`,
+            bt.k === 'Str' ? 'use byte_at(s, i) for the byte as an Int, or slice(s, i, i + 1) for a one-byte Str' : undefined);
+          return ERR;
+        }
         return bt.el;
       }
       case 'field': {
@@ -429,9 +437,9 @@ export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
       return lt;
     }
     if (op === '==' || op === '!=') {
-      if (!['Int', 'Float', 'Bool', 'Str', 'Dist'].includes(lt.k) && !simpleEnum(lt)) {
-        err('type-mismatch', e, `'${op}' compares Int, Float, Bool, Str or payload-free enums, not ${tyStr(lt)}`,
-          lt.k === 'Enum' ? `${lt.name} has variants with payloads; use match to inspect them` : 'compare the fields you care about');
+      if (!comparable(lt)) {
+        err('type-mismatch', e, `'${op}' can't compare ${tyStr(lt)}: it contains an enum with payloads`,
+          lt.k === 'Enum' ? `${lt.name} has variants with payloads; use match to inspect them` : 'compare the parts you care about, or use match on the enum values');
       }
       return Bool;
     }

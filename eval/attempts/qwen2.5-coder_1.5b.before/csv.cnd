@@ -1,0 +1,9 @@
+type Int = distinct Int
+
+fn parse_csv_ints(line: Str) -> [Int]
+  example parse_csv_ints("") == []
+  example parse_csv_ints("12,-3,40") == [12, -3, 40]
+  example parse_csv_ints("1,2,3") == [1, 2, 3]
+  example parse_csv_ints("-1,-2,-3") == [-1, -2, -3]
+  return []
+end fn parse_csv_ints

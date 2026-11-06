@@ -51,7 +51,17 @@ function render(d) {
   const sev = d.severity === 'error' ? '\x1b[31merror\x1b[0m' : '\x1b[33mnote\x1b[0m';
   let s = `${sev}[${d.code}] ${pathOf(d.file)}:${d.line}:${d.col}\n  ${d.message}\n`;
   const ln = linesOf(d.file ?? 0)[d.line - 1];
-  if (ln !== undefined) s += `   ${String(d.line).padStart(4)} | ${ln}\n          ${' '.repeat(Math.max(0, d.col - 1))}^\n`;
+  if (ln !== undefined) {
+    // Diagnostics often go straight back into a model's context: keep them short.
+    let shown = ln, caret = d.col;
+    if (ln.length > 160) {
+      const start = Math.max(0, d.col - 61);
+      const end = Math.min(ln.length, start + 120);
+      shown = (start > 0 ? '...' : '') + ln.slice(start, end) + (end < ln.length ? '...' : '');
+      caret = d.col - start + (start > 0 ? 3 : 0);
+    }
+    s += `   ${String(d.line).padStart(4)} | ${shown}\n          ${' '.repeat(Math.max(0, caret - 1))}^\n`;
+  }
   if (d.hint) s += `  hint: ${d.hint}\n`;
   return s;
 }

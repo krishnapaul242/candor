@@ -59,10 +59,28 @@
   <p>The answer to all of them is yes. The gaps caused no bugs, but both models paid for them with <strong>defensive code</strong>: nested <code>if</code>s instead of short-circuit tests, different names in every <code>case</code> arm, typed temporaries instead of <code>return []</code>, and avoided nested writes. That code is longer and harder to review than it needs to be.</p>
   <p><strong>What changed:</strong> <code>llms.txt</code> gained a "Precise semantics" section that answers each question directly, with every answer checked against both backends. A new test, <code>tests/spec.sh</code>, type-checks every complete program in the spec. On its first run it caught a broken example in the Records section that showed statements at the top level of a file, a pattern a model could easily copy.</p>
 
+  <h2>Round 1b: a model from another family, running locally</h2>
+  <p>Qwen2.5-Coder (7B and 1.5B) was trained outside Anthropic and played no part in Candor's design. It ran on a laptop through Ollama, with the <strong>repair loop</strong> on: when an attempt fails, the model gets back only what the compiler said. Each run was repeated after compiler changes, so each change's effect is visible.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Run</th><th>What changed</th><th>7B compiled first try</th><th>7B hidden tests</th><th>1.5B hidden tests</th></tr></thead>
+    <tbody>
+      <tr><td>v1</td><td>baseline</td><td>7 / 9</td><td>6 / 9</td><td>1 / 9</td></tr>
+      <tr><td>v2</td><td>structural <code>==</code> on arrays and records; three new hints</td><td>8 / 9</td><td>6 / 9</td><td>0 / 9</td></tr>
+      <tr><td>v3</td><td>repair loop also runs the model's own <code>example</code> clauses</td><td>8 / 9</td><td><strong>7 / 9</strong></td><td>0 / 9</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><strong>A hint that wasn't an edit failed.</strong> The model wrote <code>example parse_csv_ints("12,-3,40") == [12, -3, 40]</code>. Candor had no <code>==</code> on arrays, and the hint said "compare the fields you care about". The model resubmitted the same line for three rounds. Writing <code>f(x) == [..]</code> is too natural to fight, so <strong>the language changed</strong>: <code>==</code> is now structural, and that task compiles on the first try.</li>
+    <li><strong>Hints that were edits worked.</strong> "add <code>effects io</code> to the header of fn …" was fixed in one round every time.</li>
+    <li><strong>Models can check themselves.</strong> Once csv compiled, its remaining bug was stated by the model's <em>own</em> example: <code>parse_csv_ints("") == []</code>, while the code returned <code>[0]</code>. Feeding back the failing example (no hidden information) fixed it in one round. That's what <code>example</code> clauses are for.</li>
+    <li><strong>What's left is misreading the task</strong> (an extra contract, a changed signature). The model's own examples encode the same misreading, so no self-check catches it.</li>
+    <li><strong>1.5B is below the floor:</strong> it doesn't follow the task and ignores hints that state the exact fix. Its failures still led to three compiler improvements that help every model: a hint for pasted Markdown code fences, a hint for <code>s[i:j]</code> slicing, and trimming huge source lines out of diagnostics so they don't flood a model's context.</li>
+  </ul>
+
   <h2>Round 2 (planned)</h2>
   <ol>
     <li><strong>Harder tasks:</strong> multiple files with <code>use</code>, 150+ line programs, distinct-type ids, holes, and traps hidden in the obvious solution.</li>
-    <li><strong>More model families and sizes</strong>, including small open models.</li>
+    <li><strong>More model families and sizes:</strong> a 14B–32B open model, then Llama, Gemma and DeepSeek. Qwen 7B and 1.5B are done.</li>
     <li><strong>The repair loop:</strong> each failing attempt gets only the compiler's <code>--json</code> diagnostics, and we count the rounds until it passes. This tests whether Candor's error messages work <em>for models</em>, which is the point of having them.</li>
   </ol>
   <p>Everything is reproducible: <code>eval/score.sh eval/attempts/&lt;model&gt;</code>. The attempts are in the repo exactly as the models wrote them.</p>

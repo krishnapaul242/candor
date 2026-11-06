@@ -1,0 +1,14 @@
+fn transpose(m: [[Int]]) -> [[Int]]
+  let R = len(m)
+  if R == 0 then
+    return []
+  end if
+  let C = len(m[0])
+  var t = array(C, array(R, 0))
+  for i in 0 ..< R do
+    for j in 0 ..< C do
+      t[j][i] = m[i][j]
+    end for
+  end for
+  return t
+end fn transpose

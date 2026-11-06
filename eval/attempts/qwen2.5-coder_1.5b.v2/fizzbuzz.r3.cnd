@@ -1,0 +1,51 @@
+type Int = distinct Int
+type Str = distinct Str
+
+fn topword_lower(s: Str) -> Str
+  example topword_lower("Hello") == "hello"
+  var i = 0
+  var result = ""
+  while i < len(s) do
+    var c = byte_at(s, i)
+    if c >= 97 and c <= 122 then
+      result = result ++ char_at(s, i)
+    end if
+    i = i + 1
+  end while
+  return result
+end fn topword_lower
+
+fn topword_split(s: Str) -> [Str]
+  example topword_split("Hello World") == ["Hello", "World"]
+  var i = 0
+  var result = []
+  while i < len(s) do
+    var j = i
+    while j < len(s) and byte_at(s, j) >= 97 and byte_at(s, j) <= 122 do
+      j = j + 1
+    end while
+    push(result, topword_lower(s[i:j]))
+    i = j
+  end while
+  return result
+end fn topword_split
+
+fn fizzbuzz(n: Int) -> [Str]
+  example fizzbuzz(15) == ["FizzBuzz", "Fizz", "Buzz", "Fizz", "Fizz", "Fizz", "Fizz", "Fizz", "Fizz", "Buzz", "Fizz", "Fizz", "FizzBuzz"]
+  example fizzbuzz(5) == ["Fizz", "Buzz", "Fizz", "Buzz", "Fizz"]
+  example fizzbuzz(0) == []
+  example fizzbuzz(1) == ["1"]
+  var result = []
+  for i in 1 ..= n do
+    if i % 15 == 0 then
+      push(result, "FizzBuzz")
+    elseif i % 3 == 0 then
+      push(result, "Fizz")
+    elseif i % 5 == 0 then
+      push(result, "Buzz")
+    else
+      push(result, topword_lower(show(i)))
+    end if
+  end for
+  return result
+end fn fizzbuzz

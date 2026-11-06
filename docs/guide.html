@@ -82,6 +82,7 @@ end fn main</code></pre>
       <tr><td>records, enums</td><td>Declared with <code>type</code>; see <a href="#records">records</a> and <a href="#enums">enums</a>.</td></tr>
     </tbody>
   </table></div>
+  <p><code>==</code> and <code>!=</code> are structural: they work on arrays and records made of comparable values, so <code>split("a b") == ["a", "b"]</code> is true. Enums with payloads can't be compared; use <code>match</code>.</p>
   <p>There are <strong>no implicit conversions</strong>. <code>1 + 2.0</code> is an error with a hint to use <code>to_float</code>. Strings are joined with <code>++</code>, and other values become strings with <code>show</code>.</p>
 
   <h2 id="bindings">let, var and constants</h2>

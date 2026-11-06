@@ -67,6 +67,7 @@
       <li><strong>Evaluation round 2.</strong> Harder tasks: multiple files, 150+ lines, ids, holes, traps hidden in obvious solutions. More model families and sizes. Then the <strong>repair loop</strong>: give a failing model only the <code>--json</code> diagnostics and count the rounds until it passes.</li>
       <li><strong>Spec-first changes.</strong> Each language change lands in <code>llms.txt</code> together with the code, and <code>tests/spec.sh</code> keeps every example in it compiling.</li>
     </ul>
+    <p><strong>Progress:</strong> a local open model (Qwen2.5-Coder via Ollama) now runs through the repair loop. Two diagnostics that models couldn't act on were replaced: <code>==</code> became structural, and fences, slices and built-in redefinitions got hints that are edits. The loop now also runs the model's own <code>example</code> clauses. The 7B model went from 6/9 to 7/9 (<a href="eval.html">details</a>).</p>
     <p class="muted"><strong>Done when:</strong> round 2 runs on at least three model families and the results page shows first-attempt rate, repair rounds, and the error codes models hit most. The worst-performing diagnostic gets rewritten, and the measurement is rerun.</p>
   </div>
 

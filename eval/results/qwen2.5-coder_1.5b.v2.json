@@ -1,0 +1,360 @@
+{
+  "model": "qwen2.5-coder:1.5b",
+  "maxRounds": 3,
+  "date": "2026-11-06T12:44:47.243Z",
+  "tasks": {
+    "fizzbuzz": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 460,
+          "seconds": 24
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 460,
+          "seconds": 17
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 460,
+          "seconds": 21
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 460,
+          "seconds": 17
+        }
+      ],
+      "compiledAtRound": -1
+    },
+    "top_word": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 70
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 90
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 93
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 105
+        }
+      ],
+      "compiledAtRound": -1
+    },
+    "stack_machine": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 282,
+          "seconds": 12
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 282,
+          "seconds": 12
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 282,
+          "seconds": 11
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 282,
+          "seconds": 11
+        }
+      ],
+      "compiledAtRound": -1
+    },
+    "bank": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 123,
+          "seconds": 5
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "transpose": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 100,
+          "seconds": 4
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 100,
+          "seconds": 4
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 100,
+          "seconds": 4
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 100,
+          "seconds": 4
+        }
+      ],
+      "compiledAtRound": -1
+    },
+    "find": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "duplicate",
+            "missing-return"
+          ],
+          "tokens": 181,
+          "seconds": 8
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "duplicate",
+            "missing-return"
+          ],
+          "tokens": 181,
+          "seconds": 7
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "duplicate",
+            "missing-return"
+          ],
+          "tokens": 181,
+          "seconds": 7
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "duplicate",
+            "missing-return"
+          ],
+          "tokens": 181,
+          "seconds": 6
+        }
+      ],
+      "compiledAtRound": -1
+    },
+    "lookup": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 136,
+          "seconds": 5
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 136,
+          "seconds": 6
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 136,
+          "seconds": 5
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 136,
+          "seconds": 5
+        }
+      ],
+      "compiledAtRound": -1
+    },
+    "csv": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 82
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 75
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 82
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 92
+        }
+      ],
+      "compiledAtRound": -1
+    },
+    "summary": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "duplicate",
+            "duplicate",
+            "effect-missing"
+          ],
+          "tokens": 135,
+          "seconds": 6
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "codes": [
+            "duplicate",
+            "duplicate"
+          ],
+          "tokens": 139,
+          "seconds": 6
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "codes": [
+            "duplicate",
+            "duplicate"
+          ],
+          "tokens": 139,
+          "seconds": 6
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "codes": [
+            "duplicate",
+            "duplicate"
+          ],
+          "tokens": 139,
+          "seconds": 6
+        }
+      ],
+      "compiledAtRound": -1
+    }
+  }
+}

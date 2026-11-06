@@ -1,0 +1,11 @@
+type Int = distinct Int
+
+fn find(xs: [Int], target: Int) -> Int
+  example find([1, 2, 3, 4, 5], 3) == 2
+  example find([1, 2, 3, 4, 5], 6) == -1
+  example find([], 1) == -1
+  example find([10], 10) == 0
+  example find([1, 2, 3, 4, 5], 1) == 0
+  example find([1, 2, 3, 4, 5], 5) == 4
+  example find([1, 2, 3, 4, 5], 2) == 1
+end fn find

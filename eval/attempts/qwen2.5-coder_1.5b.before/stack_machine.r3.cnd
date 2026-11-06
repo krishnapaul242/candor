@@ -1,0 +1,45 @@
+type Instr = enum
+  Push(value: Int)
+  Add
+  Mul
+  Dup
+  Swap
+end type Instr
+
+fn run(prog: [Instr]) -> Int
+  var stack: [Int] = []
+  for instr in prog do
+    case instr
+      case Push(value)
+        push(stack, value)
+      case Add
+        if len(stack) < 2 then
+          trap "not enough values"
+        end if
+        let b = pop(stack)
+        let a = pop(stack)
+        push(stack, a + b)
+      case Mul
+        if len(stack) < 2 then
+          trap "not enough values"
+        end if
+        let b = pop(stack)
+        let a = pop(stack)
+        push(stack, a * b)
+      case Dup
+        if len(stack) < 1 then
+          trap "not enough values"
+        end if
+        push(stack, stack[top])
+      case Swap
+        if len(stack) < 2 then
+          trap "not enough values"
+        end if
+        let b = pop(stack)
+        let a = pop(stack)
+        push(stack, b)
+        push(stack, a)
+    end case
+  end for
+  return stack[top]
+end fn run

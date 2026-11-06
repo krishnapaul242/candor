@@ -70,7 +70,7 @@ end type Point               end type Shape
 
 **Statements:** `let` (immutable), `var` (mutable), assignment to `var` places (`x = …`, `a[i] = …`, `p.f = …`), `if c then … else if … else … end if`, `while c do … end while`, `for i in a ..< b do … end for`, `for x in xs do … end for`, `match e` / `case V(a, b)` / `case _` / `end match` (must be exhaustive), `return`, `break`, `continue`.
 
-**Expressions:** `+ - * / %` (same-type operands only; Int `/` truncates), `== !=` on Int/Float/Bool/Str and payload-free enums, `< <= > >=` on numbers, `and or not`, `++` string concatenation, `Rec { f: v }`, `[a, b]`, `Variant(args)`, `?hole`.
+**Expressions:** `+ - * / %` (same-type operands only; Int `/` truncates), `== !=` on Int/Float/Bool/Str, distinct types, payload-free enums, and (structurally) arrays and records of those, `< <= > >=` on numbers, `and or not`, `++` string concatenation, `Rec { f: v }`, `[a, b]`, `Variant(args)`, `?hole`.
 
 **Built-ins:** `print(Str)` [io], `eprint(Str)` [io], `show(Int|Float|Bool|Str|payload-free enum)` (an enum shows its variant name), `len([T]|Str)` (bytes), `push(var_array, x)`, `pop(var_array)` (removes and returns the last element; traps if empty), `array(n, fill)`, `to_float`, `to_int` (truncates; traps on out of range), `sqrt`, `assert(Bool)`, `byte_at(s, i)`, `slice(s, a, b)` (byte offsets), `from_byte(n)`, `join(parts, sep)`, `parse_float(s)`, `args()` [io], `exit(code)` [io], `read_file(path)` [fs], `write_file(path, text)` [fs], `file_exists(path)` [fs], `clock_ms()` [time].
 

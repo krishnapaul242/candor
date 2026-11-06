@@ -101,7 +101,8 @@ export function lex(src) {
     if (!op) {
       const hint = c === '!' ? 'use `not` for negation and `!=` for inequality'
         : c === '&' || c === '|' ? 'use `and` / `or`'
-        : c === ';' ? 'statements end at a newline; no semicolons' : undefined;
+        : c === ';' ? 'statements end at a newline; no semicolons'
+        : c === '`' ? 'this looks like a Markdown code fence; the file must contain only Candor code, so delete the ``` lines' : undefined;
       fail(`unexpected character '${c}'`, hint);
     }
     adv(op.length);

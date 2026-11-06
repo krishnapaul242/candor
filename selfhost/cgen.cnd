@@ -124,6 +124,49 @@ fn copy_fn(inout g: G, cx: Cx, t: TyId) -> Str
   return name
 end fn copy_fn
 
+# structural equality for arrays and records: eq_<mangle>(a, b)
+fn eq_sub(inout g: G, cx: Cx, u: TyId, a: Str, b: Str) -> Str
+  let k = tk(cx, u)
+  if k == YArr or k == YRec then
+    return eq_fn(inout g, cx, u) ++ "(" ++ a ++ ", " ++ b ++ ")"
+  end if
+  if base_of(cx, u) == T_STR then
+    return "cn_str_eq(" ++ a ++ ", " ++ b ++ ")"
+  end if
+  return "(" ++ a ++ " == " ++ b ++ ")"
+end fn eq_sub
+
+fn eq_fn(inout g: G, cx: Cx, t: TyId) -> Str
+  let name = "eq_" ++ mangle(cx, t)
+  if str_in(name, g.copy_names) then
+    return name
+  end if
+  push(g.copy_names, name)
+  let ct = ctype(cx, t)
+  var body = ""
+  if tk(cx, t) == YArr then
+    let el = cx.tys[t].el
+    let et = ctype(cx, el)
+    let cmp = eq_sub(inout g, cx, el, "((" ++ et ++ "*)a->data)[i]", "((" ++ et ++ "*)b->data)[i]")
+    body = "static bool " ++ name ++ "(" ++ ct ++ " a, " ++ ct ++ " b) { if (a->len != b->len) return false; for (int64_t i = 0; i < a->len; i++) if (!" ++ cmp ++ ") return false; return true; }"
+  else
+    let d = rec_decl(cx, t)
+    var fs: [Str] = []
+    for i in 0 ..< cnk(cx, d) do
+      let f = ckid(cx, d, i)
+      push(fs, eq_sub(inout g, cx, cx.ast.nodes[f].ty, "a.f_" ++ nname(cx, f), "b.f_" ++ nname(cx, f)))
+    end for
+    var all = join(fs, " && ")
+    if all == "" then
+      all = "true"
+    end if
+    body = "static bool " ++ name ++ "(" ++ ct ++ " a, " ++ ct ++ " b) { return " ++ all ++ "; }"
+  end if
+  push(g.copy_protos, "static bool " ++ name ++ "(" ++ ct ++ ", " ++ ct ++ ");")
+  push(g.copy_bodies, body)
+  return name
+end fn eq_fn
+
 fn octal3(b: Int) -> Str
   return show(b / 64) ++ show((b / 8) % 8) ++ show(b % 8)
 end fn octal3
@@ -342,6 +385,14 @@ fn gx_bin(inout g: G, cx: Cx, e: NodeId, fname: Str) -> Str
   let b = sq.vals[1]
   if op == "++" then
     return seq_wrap(sq, "cn_cat(" ++ a ++ ", " ++ b ++ ")")
+  end if
+  let lk = tk(cx, cx.ast.nodes[l].ty)
+  if lk == YArr or lk == YRec then
+    var eneg = ""
+    if op == "!=" then
+      eneg = "!"
+    end if
+    return seq_wrap(sq, eneg ++ eq_fn(inout g, cx, cx.ast.nodes[l].ty) ++ "(" ++ a ++ ", " ++ b ++ ")")
   end if
   if lt == T_STR then
     var neg = ""

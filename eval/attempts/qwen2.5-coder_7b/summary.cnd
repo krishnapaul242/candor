@@ -1,0 +1,26 @@
+type Summary = record
+  count: Int
+  sum: Int
+  max: Int
+end type Summary
+
+fn summarize(xs: [Int]) -> Summary
+  requires len(xs) > 0
+  var count = 0
+  var sum = 0
+  var max = xs[0]
+  for x in xs do
+    count = count + 1
+    sum = sum + x
+    if x > max then
+      max = x
+    end if
+  end for
+  return Summary { count: count, sum: sum, max: max }
+end fn summarize
+
+fn print_summary(xs: [Int])
+  effects io
+  let s = summarize(xs)
+  print("count=" ++ show(s.count) ++ " sum=" ++ show(s.sum) ++ " max=" ++ show(s.max))
+end fn print_summary

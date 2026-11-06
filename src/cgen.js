@@ -58,6 +58,30 @@ export function genC(program, info) {
     return name;
   };
 
+  // structural equality for arrays and records: eq_<mangle>(a, b)
+  const eqFn = (t) => {
+    const name = `eq_${mangle(t)}`;
+    if (copyDefs.has(name)) return name;
+    copyDefs.set(name, null);
+    const ct = ctype(t);
+    const sub = (u, a, b) => {
+      const k = (u.k === 'Dist' ? types.get(u.name).baseT : u).k;
+      if (u.k === 'Arr' || u.k === 'Rec') return `${eqFn(u)}(${a}, ${b})`;
+      if (k === 'Str') return `cn_str_eq(${a}, ${b})`;
+      return `(${a} == ${b})`;
+    };
+    let body;
+    if (t.k === 'Arr') {
+      const et = ctype(t.el);
+      body = `static bool ${name}(${ct} a, ${ct} b) { if (a->len != b->len) return false; for (int64_t i = 0; i < a->len; i++) if (!${sub(t.el, `((${et}*)a->data)[i]`, `((${et}*)b->data)[i]`)}) return false; return true; }`;
+    } else {
+      const fs = types.get(t.name).fields.map((f) => sub(f.t, `a.f_${f.name}`, `b.f_${f.name}`));
+      body = `static bool ${name}(${ct} a, ${ct} b) { return ${fs.join(' && ') || 'true'}; }`;
+    }
+    copyDefs.set(name, [`static bool ${name}(${ct}, ${ct});`, body]);
+    return name;
+  };
+
   // An expression is "simple" if evaluating it can't print, trap, or depend on order.
   const copies = (e) => (e.copy || e.copyIn) && needsCopy(e.ty);
   const simple = (e) => ['int', 'float', 'str', 'bool'].includes(e.e) || (e.e === 'ident' && !copies(e)) ||
@@ -123,6 +147,7 @@ export function genC(program, info) {
         const lt = (e.l.ty.k === 'Dist' ? types.get(e.l.ty.name).baseT : e.l.ty).k;
         const ps = parts([e.l, e.r], fn);
         if (op === '++') return seq(ps, ([l, r]) => `cn_cat(${l}, ${r})`);
+        if (e.l.ty.k === 'Arr' || e.l.ty.k === 'Rec') return seq(ps, ([l, r]) => `${op === '!=' ? '!' : ''}${eqFn(e.l.ty)}(${l}, ${r})`);
         if (lt === 'Str') return seq(ps, ([l, r]) => `${op === '!=' ? '!' : ''}cn_str_eq(${l}, ${r})`);
         if (['==', '!=', '<', '<=', '>', '>='].includes(op) || lt === 'Float') return seq(ps, ([l, r]) => `(${l} ${op} ${r})`);
         const f = { '+': null, '-': null, '*': 'cn_mul', '/': 'cn_div', '%': 'cn_mod' }[op];

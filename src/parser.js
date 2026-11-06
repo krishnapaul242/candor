@@ -335,6 +335,9 @@ export function parse(src) {
       if (atOp('[')) {
         const t = next();
         const idx = parseExpr();
+        if (atOp(':') || atOp('..<') || atOp('..=') || (atOp('.') && peek(1).kind === 'op' && peek(1).value === '.')) {
+          fail(`Candor has no slice syntax inside [ ]`, 'for a Str use slice(s, start, end); for an array, build a new one with a loop');
+        }
         expect('op', ']');
         e = { e: 'index', base: e, idx, line: t.line, col: t.col, src: srcOf(st) };
       } else if (atOp('.')) {

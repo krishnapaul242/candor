@@ -1,0 +1,48 @@
+type Point = record
+  x: Int
+  y: Int
+end type Point
+
+type Light = enum
+  Red
+  Green
+end type Light
+
+type Tagged = record
+  name: Str
+  pts: [Point]
+  light: Light
+end type Tagged
+
+fn split_words(s: Str) -> [Str]
+  example split_words("a bb c") == ["a", "bb", "c"]
+  example split_words("") == []
+  var out: [Str] = []
+  var start = 0
+  for i in 0 ..= len(s) do
+    if i == len(s) or byte_at(s, i) == 32 then
+      if i > start then
+        push(out, slice(s, start, i))
+      end if
+      start = i + 1
+    end if
+  end for
+  return out
+end fn split_words
+
+fn main()
+  effects io
+  let a = [[1, 2], [3]]
+  var b = [[1, 2], [3]]
+  print(show(a == b) ++ " " ++ show(a != b))
+  push(b[1], 4)
+  print(show(a == b) ++ " " ++ show(a != b))
+  let p = Point { x: 1, y: 2 }
+  print(show(p == Point { x: 1, y: 2 }) ++ " " ++ show(p == Point { x: 2, y: 1 }))
+  let t1 = Tagged { name: "t", pts: [p], light: Red }
+  let t2 = Tagged { name: "t", pts: [Point { x: 1, y: 2 }], light: Red }
+  let t3 = Tagged { name: "t", pts: [p], light: Green }
+  print(show(t1 == t2) ++ " " ++ show(t1 == t3) ++ " " ++ show(split_words("x y") == ["x", "y"]))
+  let empty: [Float] = []
+  print(show(empty == []) ++ " " ++ show([0.0] == [-0.0]) ++ " " ++ show([1.5] == [1.5]))
+end fn main

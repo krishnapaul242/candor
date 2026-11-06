@@ -204,6 +204,8 @@ fn lex_op(inout lx: Lexer)
       hint = "use `and` / `or`"
     else if c == 59 then
       hint = "statements end at a newline; no semicolons"
+    else if c == 96 then
+      hint = "this looks like a Markdown code fence; the file must contain only Candor code, so delete the ``` lines"
     end if
     lex_fail(inout lx, "unexpected character '" ++ from_byte(c) ++ "'", hint)
     return

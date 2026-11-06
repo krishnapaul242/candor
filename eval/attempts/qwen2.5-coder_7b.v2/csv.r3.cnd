@@ -1,0 +1,44 @@
+fn parse_csv_ints(line: Str) -> [Int]
+  example parse_csv_ints("12,-3,40") == [12, -3, 40]
+  example parse_csv_ints("") == []
+
+  let parts = split(line, ",")
+  var result: [Int] = []
+  for part in parts do
+    push(result, parse_int(part))
+  end for
+  return result
+end fn parse_csv_ints
+
+fn split(s: Str, sep: Str) -> [Str]
+  var result: [Str] = []
+  var start = 0
+  var i = 0
+  while i <= len(s) do
+    if i == len(s) or byte_at(s, i) == byte_at(sep, 0) then
+      push(result, slice(s, start, i))
+      start = i + 1
+    end if
+    i = i + 1
+  end while
+  return result
+end fn split
+
+fn parse_int(s: Str) -> Int
+  example parse_int("-42") == -42
+  example parse_int("0") == 0
+  example parse_int("123") == 123
+
+  var i = 0
+  var sign = 1
+  if len(s) > 0 and byte_at(s, 0) == 45 then
+    sign = -1
+    i = 1
+  end if
+  var n = 0
+  while i < len(s) do
+    n = n * 10 + (byte_at(s, i) - 48)
+    i = i + 1
+  end while
+  return sign * n
+end fn parse_int

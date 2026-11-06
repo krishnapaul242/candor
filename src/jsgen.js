@@ -115,6 +115,19 @@ export function genJS(program, info, { examples = false } = {}) {
   for (const td of info.types.values()) {
     if (td.kind === 'enum') out.push(`const $names_${td.name} = ${JSON.stringify(td.variants.map((v) => v.name))};`);
   }
+  // structural equality for arrays and records
+  const structural = (t) => t.k === 'Arr' || t.k === 'Rec';
+  const eqFn = (t) => {
+    const name = `$eq_${mangle(t)}`;
+    if (copyFns.has(name)) return name;
+    copyFns.set(name, null);
+    const sub = (u, a, b) => (structural(u) ? `${eqFn(u)}(${a}, ${b})` : `${a} === ${b}`);
+    let body;
+    if (t.k === 'Arr') body = `(a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (!(${sub(t.el, 'a[i]', 'b[i]')})) return false; return true; }`;
+    else body = `(a, b) => ${info.types.get(t.name).fields.map((f) => `(${sub(f.t, `a.${f.name}`, `b.${f.name}`)})`).join(' && ') || 'true'}`;
+    copyFns.set(name, `const ${name} = ${body};`);
+    return name;
+  };
   // enum singletons for payload-less variants
   for (const [vn, v] of info.variants) {
     if (!v.fields.length) out.push(`const $V_${vn} = Object.freeze({ $t: ${v.index} });`);
@@ -155,8 +168,8 @@ export function genJS(program, info, { examples = false } = {}) {
           case 'and': return `(${l} && ${r})`;
           case 'or': return `(${l} || ${r})`;
           case '++': return `(${l} + ${r})`;
-          case '==': return `(${l} === ${r})`;
-          case '!=': return `(${l} !== ${r})`;
+          case '==': return structural(e.l.ty) ? `${eqFn(e.l.ty)}(${l}, ${r})` : `(${l} === ${r})`;
+          case '!=': return structural(e.l.ty) ? `(!${eqFn(e.l.ty)}(${l}, ${r}))` : `(${l} !== ${r})`;
           case '<': case '<=': case '>': case '>=': return `(${l} ${e.op} ${r})`;
         }
         if (e.ty.k === 'Float') return `(${l} ${e.op} ${r})`;
@@ -308,7 +321,7 @@ export function genJS(program, info, { examples = false } = {}) {
         const where = JSON.stringify(f.name);
         const isEq = ex.e === 'bin' && ex.op === '==';
         const run = isEq
-          ? `() => { const l = ${expr(ex.l, label(f.name, f))}; const r = ${expr(ex.r, label(f.name, f))}; return { ok: l === r, l: $display(l), r: $display(r) }; }`
+          ? `() => { const l = ${expr(ex.l, label(f.name, f))}; const r = ${expr(ex.r, label(f.name, f))}; return { ok: ${structural(ex.l.ty) ? `${eqFn(ex.l.ty)}(l, r)` : 'l === r'}, l: $display(l), r: $display(r) }; }`
           : `() => ({ ok: ${expr(ex, label(f.name, f))} })`;
         list.push(`{ fn: ${where}, line: ${ex.line}, src: ${JSON.stringify(ex.src)}, run: ${run} }`);
       }

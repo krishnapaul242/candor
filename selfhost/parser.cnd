@@ -718,6 +718,10 @@ fn parse_postfix(inout p: P) -> NodeId
     if at_op(p, "[") then
       let t = next_tok(inout p)
       let idx = parse_expr(inout p)
+      let dotdot = at_op(p, ".") and p.toks[p.pos + 1].kind == TOp and p.toks[p.pos + 1].text == "."
+      if not p.failed and (at_op(p, ":") or at_op(p, "..<") or at_op(p, "..=") or dotdot) then
+        fail(inout p, "Candor has no slice syntax inside [ ]", "for a Str use slice(s, start, end); for an array, build a new one with a loop")
+      end if
       let _ = expect_op(inout p, "]", "")
       let line = p.toks[t].line
       let col = p.toks[t].col

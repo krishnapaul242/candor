@@ -1,0 +1,255 @@
+```cnd
+type Int = distinct Int
+type Str = distinct Str
+
+fn topword_lower(s: Str) -> Str
+  example topword_lower("Hello") == "hello"
+  var i = 0
+  var j = 0
+  while i < len(s) do
+    if byte_at(s, i) >= 97 and byte_at(s, i) <= 122 then
+      j = i
+    end if
+    i = i + 1
+  end while
+  return s[j .. len(s)]
+end fn topword_lower
+
+fn topword_upper(s: Str) -> Str
+  example topword_upper("hello") == "HELLO"
+  var i = 0
+  var j = 0
+  while i < len(s) do
+    if byte_at(s, i) >= 65 and byte_at(s, i) <= 90 then
+      j = i
+    end if
+    i = i + 1
+  end while
+  return s[j .. len(s)]
+end fn topword_upper
+
+fn topword_split(s: Str) -> [Str]
+  example topword_split("Hello") == ["Hello"]
+  var i = 0
+  var j = 0
+  var words = []
+  while i < len(s) do
+    if byte_at(s, i) >= 97 and byte_at(s, i) <= 122 then
+      j = i
+    end if
+    if byte_at(s, i) >= 65 and byte_at(s, i) <= 90 then
+      words.append(s[j .. i])
+      j = i + 1
+    end if
+    i = i + 1
+  end while
+  if j < len(s) then
+    words.append(s[j .. len(s)])
+  end if
+  return words
+end fn topword_split
+
+fn topword_reverse(s: Str) -> Str
+  example topword_reverse("Hello") == "olleH"
+  var i = 0
+  var j = len(s) - 1
+  while i < j do
+    var temp = s[i]
+    s[i] = s[j]
+    s[j] = temp
+    i = i + 1
+    j = j - 1
+  end while
+  return s
+end fn topword_reverse
+
+fn topword_sort(s: Str) -> [Str]
+  example topword_sort("Hello") == ["Hello"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var min_word = words[0]
+    var min_index = 0
+    for i in 1 .. len(words) do
+      if words[i] < min_word then
+        min_word = words[i]
+        min_index = i
+      end if
+    end for
+    push(sorted, min_word)
+    pop(words, min_index)
+  end while
+  return sorted
+end fn topword_sort
+
+fn topword_reverse_sort(s: Str) -> [Str]
+  example topword_reverse_sort("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort
+
+fn topword_reverse_sort_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort_desc
+
+fn topword_reverse_sort_desc_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort_desc_desc_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc_desc_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort_desc_desc_desc_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc_desc_desc_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort_desc_desc_desc_desc_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc_desc_desc_desc_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort_desc_desc_desc_desc_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc_desc_desc_desc_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort_desc_desc_desc_desc_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc_desc_desc_desc_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort_desc_desc_desc_desc_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc_desc_desc_desc_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max_word)
+    pop(words, max_index)
+  end while
+  return sorted
+end fn topword_reverse_sort_desc_desc_desc_desc_desc(s: Str) -> [Str]
+  example topword_reverse_sort_desc_desc_desc_desc_desc("Hello") == ["olleH"]
+  var words = topword_split(s)
+  var sorted = []
+  while len(words) > 0 do
+    var max_word = words[0]
+    var max_index = 0
+    for i in 1 .. len(words) do
+      if words[i] > max_word then
+        max_word = words[i]
+        max_index = i
+      end if
+    end for
+    push(sorted, max

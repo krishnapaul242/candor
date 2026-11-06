@@ -132,6 +132,27 @@ fn base_of(cx: Cx, t: TyId) -> TyId
   return cx.ast.nodes[type_decl(cx, cx.tys[t].name)].ty
 end fn base_of
 
+# == / != work on scalars, distinct types, payload-free enums, and arrays/records built from them.
+fn comparable(cx: Cx, t: TyId) -> Bool
+  let k = tk(cx, t)
+  if t == T_INT or t == T_FLOAT or t == T_BOOL or t == T_STR or t == T_ERR or k == YDist or simple_enum(cx, t) then
+    return true
+  end if
+  if k == YArr then
+    return comparable(cx, cx.tys[t].el)
+  end if
+  if k == YRec then
+    let d = type_decl(cx, cx.tys[t].name)
+    for i in 0 ..< cnk(cx, d) do
+      if not comparable(cx, cx.ast.nodes[ckid(cx, d, i)].ty) then
+        return false
+      end if
+    end for
+    return true
+  end if
+  return false
+end fn comparable
+
 fn needs_copy_any(cx: Cx, t: TyId) -> Bool
   let k = cx.tys[t].k
   return k == YArr or k == YRec
@@ -560,7 +581,11 @@ fn check_inner(inout cx: Cx, e: NodeId, expected: TyId) -> TyId
       return T_ERR
     end if
     if tk(cx, bt) != YArr then
-      err(inout cx, "type-mismatch", e, "can only index arrays, not " ++ ty_str(cx, bt), "")
+      var shint = ""
+      if bt == T_STR then
+        shint = "use byte_at(s, i) for the byte as an Int, or slice(s, i, i + 1) for a one-byte Str"
+      end if
+      err(inout cx, "type-mismatch", e, "can only index arrays, not " ++ ty_str(cx, bt), shint)
       return T_ERR
     end if
     return cx.tys[bt].el
@@ -815,12 +840,12 @@ fn check_bin(inout cx: Cx, e: NodeId, expected: TyId) -> TyId
     return lt
   end if
   if op == "==" or op == "!=" then
-    if lt != T_INT and lt != T_FLOAT and lt != T_BOOL and lt != T_STR and tk(cx, lt) != YDist and not simple_enum(cx, lt) then
-      var hint3 = "compare the fields you care about"
+    if not comparable(cx, lt) then
+      var hint3 = "compare the parts you care about, or use match on the enum values"
       if tk(cx, lt) == YEnum then
         hint3 = cx.tys[lt].name ++ " has variants with payloads; use match to inspect them"
       end if
-      err(inout cx, "type-mismatch", e, "'" ++ op ++ "' compares Int, Float, Bool, Str or payload-free enums, not " ++ ty_str(cx, lt), hint3)
+      err(inout cx, "type-mismatch", e, "'" ++ op ++ "' can't compare " ++ ty_str(cx, lt) ++ ": it contains an enum with payloads", hint3)
     end if
     return T_BOOL
   end if
@@ -1478,7 +1503,11 @@ fn check_program(inout cx: Cx, prog: NodeId)
     if dk == NRecord or dk == NEnum or dk == NDistinct then
       let name = nname(cx, d)
       if map_has(cx.types, name) or str_in(name, ["Int", "Float", "Bool", "Str", "Unit"]) then
-        err(inout cx, "duplicate", d, "type '" ++ name ++ "' is already defined" ++ elsewhere(cx, type_decl(cx, name), d), "")
+        var phint = ""
+        if str_in(name, ["Int", "Float", "Bool", "Str", "Unit"]) then
+          phint = name ++ " is a built-in type; delete this declaration and use " ++ name ++ " directly"
+        end if
+        err(inout cx, "duplicate", d, "type '" ++ name ++ "' is already defined" ++ elsewhere(cx, type_decl(cx, name), d), phint)
       else
         map_set(inout cx.types, name, d.value)
       end if

@@ -1,0 +1,49 @@
+type WordCount = record
+  word: Str
+  count: Int
+end type WordCount
+
+fn top_word(text: Str) -> Str
+  var words = topword_split(text)
+  var counts: [WordCount] = []
+  for word in words do
+    var found = false
+    for i in 0 ..< len(counts) do
+      if counts[i].word == word then
+        counts[i].count = counts[i].count + 1
+        found = true
+        break
+      end if
+    end for
+    if not found then
+      push(counts, WordCount { word: word, count: 1 })
+    end if
+  end for
+  var max_count = 0
+  var top_word = ""
+  for wc in counts do
+    if wc.count > max_count or (wc.count == max_count and top_word == "") then
+      max_count = wc.count
+      top_word = wc.word
+    end if
+  end for
+  return top_word
+end fn top_word
+
+fn topword_split(text: Str) -> [Str]
+  var words: [Str] = []
+  var i = 0
+  while i < len(text) do
+    if byte_at(text, i) == 32 then
+      i = i + 1
+    else
+      var j = i
+      while j < len(text) and byte_at(text, j) != 32 do
+        j = j + 1
+      end while
+      push(words, slice(text, i, j))
+      i = j
+    end if
+  end while
+  return words
+end fn topword_split

@@ -1,0 +1,402 @@
+{
+  "model": "qwen2.5-coder:1.5b",
+  "maxRounds": 3,
+  "date": "2026-11-06T13:12:22.650Z",
+  "tasks": {
+    "fizzbuzz": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 460,
+          "seconds": 22
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 460,
+          "seconds": 16
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 460,
+          "seconds": 16
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 460,
+          "seconds": 17
+        }
+      ],
+      "compiledAtRound": -1,
+      "doneAtRound": -1
+    },
+    "top_word": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 84
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 76
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 72
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 91
+        }
+      ],
+      "compiledAtRound": -1,
+      "doneAtRound": -1
+    },
+    "stack_machine": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 282,
+          "seconds": 20
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 282,
+          "seconds": 19
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 282,
+          "seconds": 19
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 282,
+          "seconds": 19
+        }
+      ],
+      "compiledAtRound": -1,
+      "doneAtRound": -1
+    },
+    "bank": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 123,
+          "seconds": 5
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 0
+    },
+    "transpose": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 100,
+          "seconds": 7
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 100,
+          "seconds": 7
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 100,
+          "seconds": 7
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 100,
+          "seconds": 7
+        }
+      ],
+      "compiledAtRound": -1,
+      "doneAtRound": -1
+    },
+    "find": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "duplicate",
+            "missing-return"
+          ],
+          "tokens": 181,
+          "seconds": 10
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "duplicate",
+            "missing-return"
+          ],
+          "tokens": 181,
+          "seconds": 9
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "duplicate",
+            "missing-return"
+          ],
+          "tokens": 181,
+          "seconds": 12
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "duplicate",
+            "missing-return"
+          ],
+          "tokens": 181,
+          "seconds": 11
+        }
+      ],
+      "compiledAtRound": -1,
+      "doneAtRound": -1
+    },
+    "lookup": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 136,
+          "seconds": 6
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 136,
+          "seconds": 5
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 136,
+          "seconds": 4
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "type-mismatch",
+            "type-mismatch"
+          ],
+          "tokens": 136,
+          "seconds": 8
+        }
+      ],
+      "compiledAtRound": -1,
+      "doneAtRound": -1
+    },
+    "csv": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 104
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 102
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 106
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "syntax"
+          ],
+          "tokens": 2048,
+          "seconds": 105
+        }
+      ],
+      "compiledAtRound": -1,
+      "doneAtRound": -1
+    },
+    "summary": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "duplicate",
+            "duplicate",
+            "effect-missing"
+          ],
+          "tokens": 135,
+          "seconds": 6
+        },
+        {
+          "round": 1,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "duplicate",
+            "duplicate"
+          ],
+          "tokens": 139,
+          "seconds": 8
+        },
+        {
+          "round": 2,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "duplicate",
+            "duplicate"
+          ],
+          "tokens": 139,
+          "seconds": 6
+        },
+        {
+          "round": 3,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "duplicate",
+            "duplicate"
+          ],
+          "tokens": 139,
+          "seconds": 8
+        }
+      ],
+      "compiledAtRound": -1,
+      "doneAtRound": -1
+    }
+  }
+}

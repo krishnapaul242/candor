@@ -1,0 +1,20 @@
+type Int = distinct Int
+type Str = distinct Str
+
+fn summarize(xs: [Int]) -> Str
+  requires xs != []
+  var sum = 0
+  var max = xs[0]
+  for x in xs do
+    sum = sum + x
+    if x > max then
+      max = x
+    end if
+  end for
+  return "count=" ++ show(len(xs)) ++ " sum=" ++ show(sum) ++ " max=" ++ show(max)
+end fn summarize
+
+fn print_summary(xs: [Int]) -> Unit
+  effects io
+  print(summarize(xs))
+end fn print_summary

@@ -1,0 +1,124 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "maxRounds": 3,
+  "date": "2026-11-06T12:41:01.579Z",
+  "tasks": {
+    "fizzbuzz": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 140,
+          "seconds": 40
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "top_word": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 364,
+          "seconds": 35
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "stack_machine": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 198,
+          "seconds": 19
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "bank": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 112,
+          "seconds": 12
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "transpose": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 111,
+          "seconds": 12
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "find": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 167,
+          "seconds": 17
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "lookup": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 83,
+          "seconds": 8
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "csv": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "codes": [],
+          "tokens": 378,
+          "seconds": 38
+        }
+      ],
+      "compiledAtRound": 0
+    },
+    "summary": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "codes": [
+            "effect-missing"
+          ],
+          "tokens": 181,
+          "seconds": 18
+        },
+        {
+          "round": 1,
+          "ok": true,
+          "codes": [],
+          "tokens": 185,
+          "seconds": 19
+        }
+      ],
+      "compiledAtRound": 1
+    }
+  }
+}

@@ -1,0 +1,5 @@
+```cnd
+fn f() -> Int
+  return 1
+end fn f
+```

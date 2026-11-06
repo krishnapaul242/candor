@@ -1,0 +1,153 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "maxRounds": 3,
+  "date": "2026-11-06T13:07:09.954Z",
+  "tasks": {
+    "fizzbuzz": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 140,
+          "seconds": 52
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 0
+    },
+    "top_word": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 364,
+          "seconds": 46
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 0
+    },
+    "stack_machine": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 198,
+          "seconds": 24
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 0
+    },
+    "bank": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 112,
+          "seconds": 14
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 0
+    },
+    "transpose": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 111,
+          "seconds": 13
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 0
+    },
+    "find": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 167,
+          "seconds": 20
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 0
+    },
+    "lookup": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 83,
+          "seconds": 10
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 0
+    },
+    "csv": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": true,
+          "codes": [
+            "example-failed"
+          ],
+          "tokens": 378,
+          "seconds": 39
+        },
+        {
+          "round": 1,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 392,
+          "seconds": 41
+        }
+      ],
+      "compiledAtRound": 0,
+      "doneAtRound": 1
+    },
+    "summary": {
+      "rounds": [
+        {
+          "round": 0,
+          "ok": false,
+          "compiles": false,
+          "codes": [
+            "effect-missing"
+          ],
+          "tokens": 181,
+          "seconds": 19
+        },
+        {
+          "round": 1,
+          "ok": true,
+          "compiles": true,
+          "codes": [],
+          "tokens": 185,
+          "seconds": 20
+        }
+      ],
+      "compiledAtRound": 1,
+      "doneAtRound": 1
+    }
+  }
+}
