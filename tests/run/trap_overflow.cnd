@@ -1,0 +1,13 @@
+fn fact(n: Int) -> Int
+  if n <= 1 then
+    return 1
+  end if
+  return n * fact(n - 1)
+end fn fact
+
+fn main()
+  effects io
+  for i in 15 ..< 25 do
+    print(show(i) ++ "! = " ++ show(fact(i)))
+  end for
+end fn main

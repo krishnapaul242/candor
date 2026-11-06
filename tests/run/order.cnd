@@ -1,0 +1,25 @@
+fn noisy(tag: Str, v: Int) -> Int
+  effects io
+  print("eval " ++ tag)
+  return v
+end fn noisy
+
+type P = record
+  a: Int
+  b: Int
+end type P
+
+fn pair(x: Int, y: Int) -> Int
+  return x * 10 + y
+end fn pair
+
+fn main()
+  effects io
+  print(show(noisy("a", 1) + noisy("b", 2)))
+  print(show(pair(noisy("c", 3), noisy("d", 4))))
+  let p = P { b: noisy("e", 5), a: noisy("f", 6) }
+  print(show(p.a) ++ show(p.b))
+  var xs = [0, 0]
+  xs[noisy("g", 1)] = noisy("h", 7)
+  print(show(xs[1]))
+end fn main

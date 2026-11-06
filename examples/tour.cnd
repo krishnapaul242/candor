@@ -1,0 +1,88 @@
+# A tour of Candor.
+
+type Point = record
+  x: Float
+  y: Float
+end type Point
+
+type Shape = enum
+  Circle(center: Point, radius: Float)
+  Rect(corner: Point, w: Float, h: Float)
+  Empty
+end type Shape
+
+# Pure function: no effects clause means it cannot print, read the clock, etc.
+fn area(s: Shape) -> Float
+  ensures result >= 0.0
+  example area(Rect(Point { x: 0.0, y: 0.0 }, 2.0, 3.0)) == 6.0
+  example area(Empty) == 0.0
+  match s
+    case Circle(_, r)
+      return 3.141592653589793 * r * r
+    case Rect(_, w, h)
+      return w * h
+    case Empty
+      return 0.0
+  end match
+end fn area
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+  requires lo <= hi
+  ensures lo <= result and result <= hi
+  example clamp(15, 0, 10) == 10
+  example clamp(-3, 0, 10) == 0
+  example clamp(5, 0, 10) == 5
+  if x < lo then
+    return lo
+  else if x > hi then
+    return hi
+  end if
+  return x
+end fn clamp
+
+fn sum(xs: [Int]) -> Int
+  example sum([1, 2, 3]) == 6
+  example sum([]) == 0
+  var total = 0
+  for x in xs do
+    total = total + x
+  end for
+  return total
+end fn sum
+
+fn primes_below(n: Int) -> [Int]
+  requires n >= 2
+  example sum(primes_below(10)) == 17
+  var sieve = array(n, true)
+  var out: [Int] = []
+  for i in 2 ..< n do
+    if sieve[i] then
+      push(out, i)
+      var j = i * i
+      while j < n do
+        sieve[j] = false
+        j = j + i
+      end while
+    end if
+  end for
+  return out
+end fn primes_below
+
+fn main()
+  effects io
+  let shapes = [Circle(Point { x: 0.0, y: 0.0 }, 1.0), Rect(Point { x: 1.0, y: 1.0 }, 2.0, 0.5), Empty]
+  var total = 0.0
+  for s in shapes do
+    total = total + area(s)
+  end for
+  print("total area = " ++ show(total))
+  print("clamp(42, 0, 10) = " ++ show(clamp(42, 0, 10)))
+  print("primes below 50: " ++ show(len(primes_below(50))))
+
+  # value semantics: copying a var never aliases
+  var a = [1, 2, 3]
+  let b = a
+  push(a, 4)
+  print("a has " ++ show(len(a)) ++ ", b has " ++ show(len(b)))
+  print("0.1 + 0.2 = " ++ show(0.1 + 0.2))
+end fn main

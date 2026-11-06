@@ -1,0 +1,11 @@
+{
+  "name": "candor",
+  "version": "0.1.0",
+  "description": "A programming language designed by an LLM, for LLMs",
+  "type": "module",
+  "bin": { "candor": "src/cli.js" },
+  "scripts": { "test": "tests/difftest.sh && node src/cli.js test examples/tour.cnd",
+    "bench": "node bench/run.js"
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,54 @@
+type Bag = record
+  name: Str
+  items: [Int]
+end type Bag
+
+type List = enum
+  Nil
+  Cons(head: Int, tail: List)
+end type List
+
+fn build(n: Int) -> List
+  var l = Nil
+  for i in 0 ..< n do
+    l = Cons(i, l)
+  end for
+  return l
+end fn build
+
+fn total(l: List) -> Int
+  match l
+    case Nil
+      return 0
+    case Cons(h, t)
+      return h + total(t)
+  end match
+end fn total
+
+fn grow(b: Bag) -> Bag
+  var c = b
+  push(c.items, 99)
+  return c
+end fn grow
+
+fn main()
+  effects io
+  var grid = [[1, 2], [3, 4]]
+  let row = grid[0]
+  grid[0][1] = 20
+  push(grid[1], 5)
+  print(show(row[1]) ++ " " ++ show(grid[0][1]) ++ " " ++ show(len(grid[1])))
+
+  let b1 = Bag { name: "b", items: [1] }
+  let b2 = grow(b1)
+  print(show(len(b1.items)) ++ " " ++ show(len(b2.items)))
+
+  var bags = array(3, Bag { name: "x", items: [] })
+  push(bags[0].items, 7)
+  print(show(len(bags[0].items)) ++ " " ++ show(len(bags[1].items)))
+
+  print(show(total(build(1000))))
+  print("héllo" ++ " " ++ show(len("héllo")))
+  print(show(7 / 2) ++ " " ++ show(-7 / 2) ++ " " ++ show(-7 % 3) ++ " " ++ show(9007199254740991 / 3))
+  print(show(true) ++ " " ++ show(not (1 < 2 and 3 > 4)))
+end fn main

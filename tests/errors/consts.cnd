@@ -1,0 +1,9 @@
+let A: Int = B + 1
+let B: Int = 2
+let LOUD: Unit = print("x")
+let Red: Int = 1
+let B: Int = 3
+
+type Light = enum
+  Red
+end type Light

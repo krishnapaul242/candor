@@ -1,0 +1,9 @@
+fn convert(amount: Float, currency: Str) -> Float
+  let rate: Float = ?exchange_rate
+  return amount * rate
+end fn convert
+
+fn main()
+  effects io
+  print(show(convert(10.0, "EUR")))
+end fn main

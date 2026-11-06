@@ -1,0 +1,318 @@
+# ===================================================================
+# candorc — the Candor compiler, written in Candor.
+# Sections: util, lexer, parser, checker, C generator, driver.
+# ===================================================================
+
+# ---------- shared enums ----------
+
+type TokKind = enum
+  TIdent
+  TKw
+  TOp
+  TInt
+  TFloat
+  TStr
+  TNl
+  TEof
+end type TokKind
+
+type NodeKind = enum
+  NInt
+  NFloat
+  NStr
+  NBool
+  NHole
+  NIdent
+  NCall
+  NRec
+  NArr
+  NIndex
+  NField
+  NUn
+  NBin
+  NInout
+  NFieldInit
+  NLet
+  NAssign
+  NExpr
+  NIf
+  NWhile
+  NFor
+  NMatch
+  NCase
+  NBindName
+  NReturn
+  NBreak
+  NContinue
+  NBlock
+  NTArr
+  NTPrim
+  NTNamed
+  NFieldDecl
+  NRecord
+  NEnum
+  NVariant
+  NParam
+  NEffect
+  NFn
+  NProgram
+  NConst
+end type NodeKind
+
+# how a name was bound
+type Bind = enum
+  BNone
+  BVar
+  BLet
+  BParam
+  BInout
+  BConst
+end type Bind
+
+# what a call / identifier resolved to
+type RefKind = enum
+  RNone
+  RVariant
+  RBuiltin
+  RFn
+end type RefKind
+
+# how an expression is used (drives copying)
+type Mode = enum
+  MValue
+  MBorrow
+  MBase
+end type Mode
+
+type TyKind = enum
+  YErr
+  YInt
+  YFloat
+  YBool
+  YStr
+  YUnit
+  YArr
+  YRec
+  YEnum
+end type TyKind
+
+# ---------- small helpers ----------
+
+fn is_digit(c: Int) -> Bool
+  return c >= 48 and c <= 57
+end fn is_digit
+
+fn is_alpha(c: Int) -> Bool
+  return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+end fn is_alpha
+
+fn is_alnum(c: Int) -> Bool
+  return is_alpha(c) or is_digit(c)
+end fn is_alnum
+
+fn lower(s: Str) -> Str
+  var parts: [Str] = []
+  for i in 0 ..< len(s) do
+    let c = byte_at(s, i)
+    if c >= 65 and c <= 90 then
+      push(parts, from_byte(c + 32))
+    else
+      push(parts, from_byte(c))
+    end if
+  end for
+  return join(parts, "")
+end fn lower
+
+fn repeat_str(s: Str, n: Int) -> Str
+  var parts: [Str] = []
+  for i in 0 ..< n do
+    push(parts, s)
+  end for
+  return join(parts, "")
+end fn repeat_str
+
+fn pad_left(s: Str, width: Int) -> Str
+  if len(s) >= width then
+    return s
+  end if
+  return repeat_str(" ", width - len(s)) ++ s
+end fn pad_left
+
+fn str_in(s: Str, xs: [Str]) -> Bool
+  for x in xs do
+    if x == s then
+      return true
+    end if
+  end for
+  return false
+end fn str_in
+
+fn min_int(a: Int, b: Int) -> Int
+  if a < b then
+    return a
+  end if
+  return b
+end fn min_int
+
+fn max_int(a: Int, b: Int) -> Int
+  if a > b then
+    return a
+  end if
+  return b
+end fn max_int
+
+# Split on newline bytes.
+fn split_lines(s: Str) -> [Str]
+  var out: [Str] = []
+  var start = 0
+  for i in 0 ..< len(s) do
+    if byte_at(s, i) == 10 then
+      push(out, slice(s, start, i))
+      start = i + 1
+    end if
+  end for
+  push(out, slice(s, start, len(s)))
+  return out
+end fn split_lines
+
+fn starts_with(s: Str, prefix: Str) -> Bool
+  if len(prefix) > len(s) then
+    return false
+  end if
+  return slice(s, 0, len(prefix)) == prefix
+end fn starts_with
+
+fn ends_with(s: Str, suffix: Str) -> Bool
+  if len(suffix) > len(s) then
+    return false
+  end if
+  return slice(s, len(s) - len(suffix), len(s)) == suffix
+end fn ends_with
+
+# ---------- hash map: Str -> Int (insertion-ordered keys) ----------
+
+type StrMap = record
+  keys: [Str]
+  vals: [Int]
+  slots: [Int]
+end type StrMap
+
+fn str_hash(s: Str) -> Int
+  var h = 5381
+  for i in 0 ..< len(s) do
+    h = (h * 33 + byte_at(s, i)) % 1000000007
+  end for
+  return h
+end fn str_hash
+
+fn map_new() -> StrMap
+  return StrMap { keys: [], vals: [], slots: array(16, -1) }
+end fn map_new
+
+fn map_slot(m: StrMap, k: Str) -> Int
+  let n = len(m.slots)
+  var i = str_hash(k) % n
+  while true do
+    let s = m.slots[i]
+    if s < 0 then
+      return i
+    end if
+    if m.keys[s] == k then
+      return i
+    end if
+    i = (i + 1) % n
+  end while
+end fn map_slot
+
+fn map_get(m: StrMap, k: Str) -> Int
+  example map_get(map_new(), "x") == -1
+  let s = m.slots[map_slot(m, k)]
+  if s < 0 then
+    return -1
+  end if
+  return m.vals[s]
+end fn map_get
+
+fn map_has(m: StrMap, k: Str) -> Bool
+  return m.slots[map_slot(m, k)] >= 0
+end fn map_has
+
+fn map_set(inout m: StrMap, k: Str, v: Int)
+  let i = map_slot(m, k)
+  let s = m.slots[i]
+  if s >= 0 then
+    m.vals[s] = v
+    return
+  end if
+  push(m.keys, k)
+  push(m.vals, v)
+  m.slots[i] = len(m.keys) - 1
+  if len(m.keys) * 2 > len(m.slots) then
+    map_grow(inout m)
+  end if
+end fn map_set
+
+fn map_grow(inout m: StrMap)
+  let n = len(m.slots) * 2
+  m.slots = array(n, -1)
+  for j in 0 ..< len(m.keys) do
+    var i = str_hash(m.keys[j]) % n
+    while m.slots[i] >= 0 do
+      i = (i + 1) % n
+    end while
+    m.slots[i] = j
+  end for
+end fn map_grow
+
+# ---------- diagnostics ----------
+
+type Diag = record
+  code: Str
+  msg: Str
+  hint: Str
+  line: Int
+  col: Int
+end type Diag
+
+fn no_diag() -> Diag
+  return Diag { code: "", msg: "", hint: "", line: 0, col: 0 }
+end fn no_diag
+
+fn edit_distance(a: Str, b: Str) -> Int
+  example edit_distance("kitten", "sitting") == 3
+  var prev = array(len(b) + 1, 0)
+  for j in 0 ..= len(b) do
+    prev[j] = j
+  end for
+  for i in 1 ..= len(a) do
+    var cur = array(len(b) + 1, 0)
+    cur[0] = i
+    for j in 1 ..= len(b) do
+      var cost = 1
+      if byte_at(a, i - 1) == byte_at(b, j - 1) then
+        cost = 0
+      end if
+      cur[j] = min_int(min_int(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + cost)
+    end for
+    prev = cur
+  end for
+  return prev[len(b)]
+end fn edit_distance
+
+# Closest candidate within a small edit distance, or "".
+fn suggest(name: Str, cands: [Str]) -> Str
+  var best = ""
+  var bd = 1000000
+  let ln = lower(name)
+  for c in cands do
+    let d = edit_distance(ln, lower(c))
+    if d < bd then
+      bd = d
+      best = c
+    end if
+  end for
+  if best != "" and bd <= max_int(1, len(name) / 3) then
+    return best
+  end if
+  return ""
+end fn suggest

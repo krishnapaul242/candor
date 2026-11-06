@@ -1,0 +1,48 @@
+type Body = record
+  x: Float
+  y: Float
+  vx: Float
+  vy: Float
+  m: Float
+end type Body
+
+fn step(bs: [Body], dt: Float) -> [Body]
+  var out = bs
+  let n = len(bs)
+  for i in 0 ..< n do
+    var ax = 0.0
+    var ay = 0.0
+    for j in 0 ..< n do
+      if i != j then
+        let dx = bs[j].x - bs[i].x
+        let dy = bs[j].y - bs[i].y
+        let d2 = dx * dx + dy * dy + 0.01
+        let inv = bs[j].m / (d2 * sqrt(d2))
+        ax = ax + dx * inv
+        ay = ay + dy * inv
+      end if
+    end for
+    out[i].vx = bs[i].vx + ax * dt
+    out[i].vy = bs[i].vy + ay * dt
+    out[i].x = bs[i].x + out[i].vx * dt
+    out[i].y = bs[i].y + out[i].vy * dt
+  end for
+  return out
+end fn step
+
+fn main()
+  effects io
+  var bs: [Body] = []
+  for i in 0 ..< 60 do
+    let t = to_float(i)
+    push(bs, Body { x: t, y: t * 0.5 - 3.0, vx: 0.0, vy: 0.1, m: 1.0 + t / 60.0 })
+  end for
+  for s in 0 ..< 30000 do
+    bs = step(bs, 0.001)
+  end for
+  var e = 0.0
+  for b in bs do
+    e = e + 0.5 * b.m * (b.vx * b.vx + b.vy * b.vy)
+  end for
+  print(show(e))
+end fn main

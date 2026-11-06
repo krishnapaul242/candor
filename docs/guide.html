@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candor Language Guide</title>
+<meta name="description" content="Candor language guide: types, functions, contracts, effects, typed holes, enums, value semantics, inout, constants, built-ins and the CLI.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="./">Candor<span>.</span></a>
+  <nav class="site">
+    <a href="./">Overview</a>
+    <a href="guide.html" aria-current="page">Language guide</a>
+    <a href="selfhosting.html">Self-hosting</a>
+    <a href="roadmap.html">Roadmap</a>
+    <a class="gh" href="https://github.com/krishnapaul242/candor">GitHub</a>
+  </nav>
+</div></header>
+
+<main><div class="prose">
+  <h1>Language guide</h1>
+  <p class="lede">The whole language, in the order you'll need it. Every example on this page is valid Candor.</p>
+
+  <ol class="toc">
+    <li><a href="#files">Files, lines and blocks</a></li>
+    <li><a href="#types">Types</a></li>
+    <li><a href="#bindings">let, var and constants</a></li>
+    <li><a href="#control">Control flow</a></li>
+    <li><a href="#functions">Functions</a></li>
+    <li><a href="#contracts">Contracts and examples</a></li>
+    <li><a href="#effects">Effects</a></li>
+    <li><a href="#holes">Typed holes</a></li>
+    <li><a href="#records">Records</a></li>
+    <li><a href="#enums">Enums and match</a></li>
+    <li><a href="#values">Value semantics</a></li>
+    <li><a href="#inout">inout and borrowing</a></li>
+    <li><a href="#builtins">Built-ins</a></li>
+    <li><a href="#traps">Traps</a></li>
+    <li><a href="#cli">The CLI</a></li>
+    <li><a href="#diagnostics">Reading diagnostics</a></li>
+  </ol>
+
+  <h2 id="files">Files, lines and blocks</h2>
+  <p>A <code>.cnd</code> file holds top-level <code>type</code>, <code>fn</code> and constant (<code>let</code>) declarations. One statement per line; a newline ends a statement, except inside brackets or after an operator or comma, so long expressions can wrap after <code>+</code> or <code>,</code>. Comments start with <code>#</code>.</p>
+  <p>Every block ends with a <strong>labeled</strong> <code>end</code>: <code>end fn name</code>, <code>end type Name</code>, <code>end if</code>, <code>end while</code>, <code>end for</code>, <code>end match</code>. If the label doesn't match the open block, the error names the line where the block was opened.</p>
+
+  <h2 id="types">Types</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Type</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>Int</code></td><td>Integer in ±(2<sup>53</sup>−1). Overflow <a href="#traps">traps</a> instead of wrapping. <code>/</code> truncates toward zero.</td></tr>
+      <tr><td><code>Float</code></td><td>IEEE-754 double. <code>show</code> prints the shortest form that round-trips: <code>0.1 + 0.2</code> shows as <code>0.30000000000000004</code>.</td></tr>
+      <tr><td><code>Bool</code></td><td><code>true</code> / <code>false</code>. Nothing else is truthy.</td></tr>
+      <tr><td><code>Str</code></td><td>Immutable UTF-8 bytes. <code>len</code>, <code>byte_at</code> and <code>slice</code> work on bytes.</td></tr>
+      <tr><td><code>Unit</code></td><td>The "no value" type: what a function without <code>-&gt; T</code> returns.</td></tr>
+      <tr><td><code>[T]</code></td><td>Growable array of <code>T</code>.</td></tr>
+      <tr><td>records, enums</td><td>Declared with <code>type</code>; see <a href="#records">records</a> and <a href="#enums">enums</a>.</td></tr>
+    </tbody>
+  </table></div>
+  <p>There are <strong>no implicit conversions</strong>. <code>1 + 2.0</code> is an error with a hint to use <code>to_float</code>. Strings are joined with <code>++</code>, and other values become strings with <code>show</code>.</p>
+
+  <h2 id="bindings">let, var and constants</h2>
+<pre><code class="cnd">let LIMIT: Int = 100          # top-level constant: type required
+
+fn demo()
+  let name = "Ada"            # immutable
+  var count = 0               # mutable
+  count = count + 1
+  var xs: [Int] = []          # empty literals need a type
+end fn demo</code></pre>
+  <ul>
+    <li><strong>No shadowing.</strong> A name can't be redeclared anywhere it's already visible, including over a constant or parameter. Every name means one thing.</li>
+    <li><strong>Constants</strong> are initialized in order. An initializer may use literals, operators, <em>earlier</em> constants and pure built-ins, but can't call functions, so initialization order never matters.</li>
+    <li><code>let _ = f()</code> discards a result on purpose. Silently ignoring a non-Unit result is an error.</li>
+  </ul>
+
+  <h2 id="control">Control flow</h2>
+<pre><code class="cnd">if x &lt; 0 then
+  print("negative")
+else if x == 0 then
+  print("zero")
+else
+  print("positive")
+end if
+
+while n > 1 do
+  n = n / 2
+end while
+
+for i in 0 ..&lt; 10 do        # 0..9
+  print(show(i))
+end for
+
+for i in 1 ..= 10 do        # 1..10
+  print(show(i))
+end for
+
+for x in xs do              # elements
+  print(show(x))
+end for</code></pre>
+  <p><code>break</code> and <code>continue</code> work in loops. Comparisons don't chain (<code>a &lt; b &lt; c</code> is an error); write <code>a &lt; b and b &lt; c</code>. Boolean operators are the words <code>and</code>, <code>or</code> and <code>not</code>.</p>
+
+  <h2 id="functions">Functions</h2>
+<pre><code class="cnd">fn hypot(a: Float, b: Float) -> Float
+  return sqrt(a * a + b * b)
+end fn hypot</code></pre>
+  <p>Every parameter is annotated. Omit <code>-&gt; T</code> for Unit. Before the body comes an optional header of clauses, in any order: <code>requires</code>, <code>ensures</code>, <code>example</code> and <code>effects</code>. A function with a return type must return on every path, and the checker verifies this. Functions are not values, so they can't be stored or passed around.</p>
+
+  <h2 id="contracts">Contracts and examples</h2>
+<pre><code class="cnd">fn clamp(x: Int, lo: Int, hi: Int) -> Int
+  requires lo &lt;= hi
+  ensures lo &lt;= result and result &lt;= hi
+  example clamp(15, 0, 10) == 10
+  example clamp(-3, 0, 10) == 0
+  if x &lt; lo then
+    return lo
+  else if x > hi then
+    return hi
+  end if
+  return x
+end fn clamp</code></pre>
+  <ul>
+    <li><code>requires</code> is checked on entry and <code>ensures</code> on exit (<code>result</code> is the return value). A failure traps and quotes the clause: <code>ensures failed: result * result &lt;= n</code>.</li>
+    <li><code>example</code> clauses are tests attached to the definition. <code>candor test file.cnd</code> runs them all, and a failing <code>==</code> example shows both sides.</li>
+    <li>All three kinds of clause must be pure: no effects.</li>
+  </ul>
+
+  <h2 id="effects">Effects</h2>
+  <p>A function that touches the outside world has to say so, and so does every function that calls it.</p>
+<pre><code class="cnd">fn log_total(xs: [Int]) -> Int
+  effects io
+  var t = 0
+  for x in xs do
+    t = t + x
+  end for
+  print("total: " ++ show(t))
+  return t
+end fn log_total</code></pre>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Effect</th><th>Covers</th></tr></thead>
+    <tbody>
+      <tr><td><code>io</code></td><td><code>print</code>, <code>eprint</code>, <code>args</code>, <code>exit</code></td></tr>
+      <tr><td><code>fs</code></td><td><code>read_file</code>, <code>write_file</code></td></tr>
+      <tr><td><code>time</code></td><td><code>clock_ms</code></td></tr>
+    </tbody>
+  </table></div>
+  <p>A missing effect gets an exact fix: <code>hint: add 'effects io' to the header of fn log_total (line 1)</code>. A function with no <code>effects</code> clause is pure, so you can reason about it without reading anything else.</p>
+
+  <h2 id="holes">Typed holes</h2>
+  <p>When you don't know something, write a hole instead of guessing:</p>
+<pre><code class="cnd">fn convert(amount: Float, currency: Str) -> Float
+  let rate: Float = ?exchange_rate
+  return amount * rate
+end fn convert</code></pre>
+<pre><code>$ candor check convert.cnd
+hole ?exchange_rate : Float   (convert.cnd:2:21, in fn convert)
+  in scope: amount: Float, currency: Str</code></pre>
+  <p>Holes type-check, so the rest of the program is still verified around them. Reaching one at runtime traps (<code>reached hole ?exchange_rate</code>), and <code>candor build</code> refuses to produce a binary while any remain, unless you pass <code>--allow-holes</code>. A hole needs a known type from its context, such as an annotation, a parameter or a return type.</p>
+
+  <h2 id="records">Records</h2>
+<pre><code class="cnd">type Point = record
+  x: Float
+  y: Float
+end type Point
+
+fn shifted(p: Point, dx: Float) -> Point
+  var q = p
+  q.x = q.x + dx
+  return q
+end fn shifted
+
+fn origin() -> Point
+  return Point { x: 0.0, y: 0.0 }   # every field, explicitly
+end fn origin</code></pre>
+  <p>Records are plain values. A record can't contain itself directly; use an enum or an array for recursive data.</p>
+
+  <h2 id="enums">Enums and match</h2>
+<pre><code class="cnd">type List = enum
+  Nil
+  Cons(head: Int, tail: List)
+end type List
+
+fn sum(l: List) -> Int
+  match l
+    case Nil
+      return 0
+    case Cons(h, t)
+      return h + sum(t)
+  end match
+end fn sum</code></pre>
+  <ul>
+    <li><code>match</code> must be exhaustive: list every variant or end with <code>case _</code>.</li>
+    <li>Variant names are global, so <code>case Nil</code> is never ambiguous.</li>
+    <li>Enums whose variants carry no data support <code>==</code>, <code>!=</code> and <code>show</code>, which prints the variant name. Use them for kinds and states: <code>if light == Red then</code>.</li>
+    <li>Payload fields are read only through <code>match</code>.</li>
+  </ul>
+
+  <h2 id="values">Value semantics</h2>
+  <p>Assigning never creates a hidden alias:</p>
+<pre><code class="cnd">var a = [1, 2, 3]
+let b = a
+push(a, 4)
+# len(a) == 4, len(b) == 3</code></pre>
+  <p>This costs less than it might seem. Function arguments are <strong>borrowed</strong>, so passing even a huge array is free because the callee can't change it. Copies happen only when a value <em>escapes</em>: when it's stored in a <code>var</code>, pushed, put in a literal, or returned, and only if it isn't fresh already. Returning a local <code>var</code> never copies.</p>
+
+  <h2 id="inout">inout and borrowing</h2>
+  <p>Mutating a caller's variable is allowed, but it has to be visible at both ends:</p>
+<pre><code class="cnd">type Parser = record
+  toks: [Str]
+  pos: Int
+end type Parser
+
+fn advance(inout p: Parser) -> Str
+  let t = p.toks[p.pos]
+  p.pos = p.pos + 1
+  return t
+end fn advance
+
+fn main()
+  effects io
+  var p = Parser { toks: ["a", "b"], pos: 0 }
+  print(advance(inout p))    # the call site says `inout`
+end fn main</code></pre>
+  <ul>
+    <li>An <code>inout</code> argument must be a <code>var</code> place: <code>x</code>, <code>xs[i]</code> or <code>r.field</code>.</li>
+    <li>The same variable can't be passed <code>inout</code> twice in one call, or borrowed (if it's an array or record) while also passed <code>inout</code>. This rules out aliasing.</li>
+  </ul>
+
+  <h2 id="builtins">Built-ins</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Function</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>print(s)</code>, <code>eprint(s)</code></td><td>Print a line to stdout / stderr. Effect <code>io</code>.</td></tr>
+      <tr><td><code>show(x)</code></td><td>Int, Float, Bool, Str, or a payload-free enum → <code>Str</code>.</td></tr>
+      <tr><td><code>len(x)</code></td><td>Array length, or Str length in bytes.</td></tr>
+      <tr><td><code>push(xs, v)</code>, <code>pop(xs)</code></td><td>Append to / remove and return the last element of a <code>var</code> array. <code>pop</code> on an empty array traps.</td></tr>
+      <tr><td><code>array(n, fill)</code></td><td>New array of <code>n</code> independent copies of <code>fill</code>.</td></tr>
+      <tr><td><code>to_float(i)</code>, <code>to_int(f)</code></td><td>Explicit conversions. <code>to_int</code> truncates, and traps outside Int range.</td></tr>
+      <tr><td><code>sqrt(f)</code>, <code>assert(b)</code></td><td><code>assert</code> traps with the source text of the condition.</td></tr>
+      <tr><td><code>byte_at(s, i)</code>, <code>slice(s, a, b)</code>, <code>from_byte(n)</code></td><td>Byte-level string access, bounds-checked.</td></tr>
+      <tr><td><code>join(parts, sep)</code></td><td>Build strings efficiently from an array of pieces.</td></tr>
+      <tr><td><code>parse_float(s)</code></td><td>Strict decimal parse. Traps on invalid input.</td></tr>
+      <tr><td><code>args()</code>, <code>exit(code)</code></td><td>Program arguments and exit. Effect <code>io</code>.</td></tr>
+      <tr><td><code>read_file(p)</code>, <code>write_file(p, s)</code></td><td>Whole-file I/O. Effect <code>fs</code>. Traps on failure.</td></tr>
+      <tr><td><code>clock_ms()</code></td><td>Wall-clock milliseconds. Effect <code>time</code>.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2 id="traps">Traps</h2>
+  <p>Runtime errors stop the program with a message naming the function and line, and exit with code 1:</p>
+<pre><code>trap in fact at line 5: integer overflow
+trap in main at line 5: index 3 out of bounds for length 3
+trap in sqrt_int at line 3: ensures failed: result * result &lt;= n</code></pre>
+  <p>Integer overflow, bad indexes, division by zero, failed contracts and assertions, <code>pop</code> on an empty array, out-of-range <code>to_int</code>, and reached holes all trap. Nothing wraps or truncates silently.</p>
+
+  <h2 id="cli">The CLI</h2>
+<pre><code>node src/cli.js check file.cnd [--json]          # types, effects, holes
+node src/cli.js run   file.cnd [args...]         # instant JS path
+node src/cli.js run   --native file.cnd [args]   # build with clang, then run
+node src/cli.js test  file.cnd [--json]          # run every example clause
+node src/cli.js build file.cnd [-o out] [--emit-c] [--allow-holes]</code></pre>
+  <p>Both backends implement the same semantics. Float printing, evaluation order (strictly left to right) and trap messages are identical, and the test suite enforces it byte for byte.</p>
+
+  <h2 id="diagnostics">Reading diagnostics</h2>
+<pre><code>error[effect-missing] demo.cnd:6:3
+  print(...) needs effect 'io', but fn log_total does not declare it
+      6 |   print("total: " ++ show(t))
+            ^
+  hint: add 'effects io' to the header of fn log_total (line 1)</code></pre>
+  <p>Every error has a stable code (<code>type-mismatch</code>, <code>effect-missing</code>, <code>non-exhaustive</code>, <code>inout-alias</code>, <code>const-order</code>, …), an exact position, and usually a hint that is a concrete edit. With <code>--json</code>, tools and models get structured output with the same fields.</p>
+</div></main>
+
+<footer class="site"><div class="inner">
+  Candor · <a href="https://github.com/krishnapaul242/candor">github.com/krishnapaul242/candor</a> · designed and built by Claude (Anthropic) with Krishna Paul
+</div></footer>
+<script src="candor.js"></script>
+</body>
+</html>

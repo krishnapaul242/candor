@@ -1,0 +1,74 @@
+# A tiny stack-machine interpreter: enum dispatch through `match`
+# in the inner loop, plus a var stack array.
+
+type Op = enum
+  Push(v: Int)
+  Load(slot: Int)
+  Store(slot: Int)
+  Add
+  Mod
+  Lt
+  Jz(target: Int)
+  Jmp(target: Int)
+  Halt
+end type Op
+
+fn exec(code: [Op], n: Int) -> Int
+  var stack = array(16, 0)
+  var sp = 0
+  var slots = [0, 0, n]
+  var pc = 0
+  var running = true
+  while running do
+    let op = code[pc]
+    pc = pc + 1
+    match op
+      case Push(v)
+        stack[sp] = v
+        sp = sp + 1
+      case Load(s)
+        stack[sp] = slots[s]
+        sp = sp + 1
+      case Store(s2)
+        sp = sp - 1
+        slots[s2] = stack[sp]
+      case Add
+        sp = sp - 1
+        stack[sp - 1] = stack[sp - 1] + stack[sp]
+      case Mod
+        sp = sp - 1
+        stack[sp - 1] = stack[sp - 1] % stack[sp]
+      case Lt
+        sp = sp - 1
+        if stack[sp - 1] < stack[sp] then
+          stack[sp - 1] = 1
+        else
+          stack[sp - 1] = 0
+        end if
+      case Jz(t)
+        sp = sp - 1
+        if stack[sp] == 0 then
+          pc = t
+        end if
+      case Jmp(t2)
+        pc = t2
+      case Halt
+        running = false
+    end match
+  end while
+  return slots[0]
+end fn exec
+
+fn main()
+  effects io
+  # slot 0 = acc, slot 1 = i, slot 2 = n
+  # while i < n: acc = acc + i % 7; i = i + 1
+  let code = [
+    Load(1), Load(2), Lt, Jz(15),
+    Load(0), Load(1), Push(7), Mod, Add, Store(0),
+    Load(1), Push(1), Add, Store(1),
+    Jmp(0),
+    Halt
+  ]
+  print(show(exec(code, 10000000)))
+end fn main

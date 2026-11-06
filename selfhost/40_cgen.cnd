@@ -1,0 +1,842 @@
+# ===================== C generator =====================
+# Mirrors src/cgen.js. Output #includes runtime/candor_rt.h.
+# GNU statement expressions pin evaluation order to left-to-right.
+
+type G = record
+  tmp: Int
+  copy_names: [Str]
+  copy_protos: [Str]
+  copy_bodies: [Str]
+end type G
+
+type Seq = record
+  pre: Str
+  vals: [Str]
+end type Seq
+
+type Place = record
+  pre: [Str]
+  lv: Str
+end type Place
+
+fn new_tmp(inout g: G) -> Str
+  let n = g.tmp
+  g.tmp = g.tmp + 1
+  return "_t" ++ show(n)
+end fn new_tmp
+
+fn ctype(cx: Cx, t: Int) -> Str
+  match cx.tys[t].k
+    case YInt
+      return "int64_t"
+    case YFloat
+      return "double"
+    case YBool
+      return "bool"
+    case YStr
+      return "cn_str"
+    case YUnit
+      return "void"
+    case YArr
+      return "cn_arr*"
+    case YRec
+      return "R_" ++ cx.tys[t].name
+    case YEnum
+      return "E_" ++ cx.tys[t].name ++ "*"
+    case YErr
+      return "/* error type */ void"
+  end match
+end fn ctype
+
+fn mangle(cx: Cx, t: Int) -> Str
+  match cx.tys[t].k
+    case YArr
+      return "A_" ++ mangle(cx, cx.tys[t].el)
+    case YRec
+      return "R_" ++ cx.tys[t].name
+    case YEnum
+      return "E_" ++ cx.tys[t].name
+    case _
+      return lower(slice(ty_str(cx, t), 0, 1))
+  end match
+end fn mangle
+
+fn rec_decl(cx: Cx, t: Int) -> Int
+  return map_get(cx.types, cx.tys[t].name)
+end fn rec_decl
+
+fn needs_copy_c(cx: Cx, t: Int) -> Bool
+  let k = tk(cx, t)
+  if k == YArr then
+    return true
+  end if
+  if k == YRec then
+    let d = rec_decl(cx, t)
+    for i in 0 ..< cnk(cx, d) do
+      if needs_copy_c(cx, cx.ast.nodes[ckid(cx, d, i)].ty) then
+        return true
+      end if
+    end for
+  end if
+  return false
+end fn needs_copy_c
+
+fn copy_fn(inout g: G, cx: Cx, t: Int) -> Str
+  let name = "cp_" ++ mangle(cx, t)
+  if str_in(name, g.copy_names) then
+    return name
+  end if
+  push(g.copy_names, name)
+  let ct = ctype(cx, t)
+  var body = ""
+  if tk(cx, t) == YArr then
+    let el = cx.tys[t].el
+    let et = ctype(cx, el)
+    var inner = "memcpy(b->data, a->data, (size_t)a->len * sizeof(" ++ et ++ "));"
+    if needs_copy_c(cx, el) then
+      let ef = copy_fn(inout g, cx, el)
+      inner = "for (int64_t i = 0; i < a->len; i++) ((" ++ et ++ "*)b->data)[i] = " ++ ef ++ "(((" ++ et ++ "*)a->data)[i]);"
+    end if
+    body = "static " ++ ct ++ " " ++ name ++ "(" ++ ct ++ " a) { cn_arr* b = cn_arr_new(a->len, sizeof(" ++ et ++ ")); " ++ inner ++ " return b; }"
+  else
+    let d = rec_decl(cx, t)
+    var sets: [Str] = []
+    for i in 0 ..< cnk(cx, d) do
+      let f = ckid(cx, d, i)
+      let ft = cx.ast.nodes[f].ty
+      if needs_copy_c(cx, ft) then
+        let ff = copy_fn(inout g, cx, ft)
+        push(sets, "r.f_" ++ nname(cx, f) ++ " = " ++ ff ++ "(r.f_" ++ nname(cx, f) ++ ");")
+      end if
+    end for
+    body = "static " ++ ct ++ " " ++ name ++ "(" ++ ct ++ " r) { " ++ join(sets, " ") ++ " return r; }"
+  end if
+  push(g.copy_protos, "static " ++ ct ++ " " ++ name ++ "(" ++ ct ++ ");")
+  push(g.copy_bodies, body)
+  return name
+end fn copy_fn
+
+fn octal3(b: Int) -> Str
+  return show(b / 64) ++ show((b / 8) % 8) ++ show(b % 8)
+end fn octal3
+
+fn c_str(s: Str) -> Str
+  var parts = ["\""]
+  for i in 0 ..< len(s) do
+    let b = byte_at(s, i)
+    if b >= 32 and b < 127 and b != 34 and b != 92 and b != 63 then
+      push(parts, from_byte(b))
+    else
+      push(parts, "\\" ++ octal3(b))
+    end if
+  end for
+  push(parts, "\"")
+  return join(parts, "")
+end fn c_str
+
+fn loc(cx: Cx, fname: Str, e: Int) -> Str
+  return "\"" ++ fname ++ "\", " ++ show(cx.ast.nodes[e].line)
+end fn loc
+
+fn copies(cx: Cx, e: Int) -> Bool
+  return (cx.ast.nodes[e].copy or cx.ast.nodes[e].copy_in) and needs_copy_c(cx, cx.ast.nodes[e].ty)
+end fn copies
+
+fn simple(cx: Cx, e: Int) -> Bool
+  let k = nkind(cx, e)
+  if k == NInt or k == NFloat or k == NStr or k == NBool then
+    return true
+  end if
+  if k == NIdent then
+    return not copies(cx, e)
+  end if
+  if k == NField then
+    return not copies(cx, e) and simple(cx, ckid(cx, e, 0))
+  end if
+  return false
+end fn simple
+
+# Evaluate `nodes` (already generated as `codes`) strictly left to right.
+fn seq_parts(inout g: G, cx: Cx, nodes: [Int], codes: [Str]) -> Seq
+  var complex = 0
+  for n in nodes do
+    if not simple(cx, n) then
+      complex = complex + 1
+    end if
+  end for
+  if complex <= 1 then
+    return Seq { pre: "", vals: codes }
+  end if
+  var decls: [Str] = []
+  var names: [Str] = []
+  for i in 0 ..< len(nodes) do
+    if simple(cx, nodes[i]) then
+      push(names, codes[i])
+    else
+      let t = new_tmp(inout g)
+      push(decls, ctype(cx, cx.ast.nodes[nodes[i]].ty) ++ " " ++ t ++ " = " ++ codes[i] ++ ";")
+      push(names, t)
+    end if
+  end for
+  return Seq { pre: join(decls, " "), vals: names }
+end fn seq_parts
+
+fn seq_wrap(s: Seq, body: Str) -> Str
+  if s.pre == "" then
+    return body
+  end if
+  return "({ " ++ s.pre ++ " " ++ body ++ "; })"
+end fn seq_wrap
+
+fn gen_list(inout g: G, cx: Cx, nodes: [Int], fname: Str) -> [Str]
+  var out: [Str] = []
+  for n in nodes do
+    push(out, gx(inout g, cx, n, fname))
+  end for
+  return out
+end fn gen_list
+
+fn kid_list(cx: Cx, e: Int) -> [Int]
+  var out: [Int] = []
+  for i in 0 ..< cnk(cx, e) do
+    push(out, ckid(cx, e, i))
+  end for
+  return out
+end fn kid_list
+
+fn gx(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+  let s = gx_inner(inout g, cx, e, fname)
+  if copies(cx, e) then
+    let cf = copy_fn(inout g, cx, cx.ast.nodes[e].ty)
+    return cf ++ "(" ++ s ++ ")"
+  end if
+  return s
+end fn gx
+
+fn gx_inner(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+  let k = nkind(cx, e)
+  if k == NInt then
+    return "INT64_C(" ++ show(cx.ast.nodes[e].ival) ++ ")"
+  end if
+  if k == NFloat then
+    let fs = show(cx.ast.nodes[e].fval)
+    if fs == "inf" then
+      return "INFINITY"
+    end if
+    return "(" ++ fs ++ ")"
+  end if
+  if k == NStr then
+    let sv = cx.ast.nodes[e].sval
+    return "CN_S(" ++ c_str(sv) ++ ", " ++ show(len(sv)) ++ ")"
+  end if
+  if k == NBool then
+    if cx.ast.nodes[e].flag then
+      return "true"
+    end if
+    return "false"
+  end if
+  if k == NHole then
+    return "({ cn_trap(" ++ loc(cx, fname, e) ++ ", \"reached hole ?" ++ nname(cx, e) ++ "\"); *(" ++ ctype(cx, cx.ast.nodes[e].ty) ++ "*)0; })"
+  end if
+  if k == NIdent then
+    if cx.ast.nodes[e].what == RVariant then
+      return "(&cn_V_" ++ nname(cx, e) ++ ")"
+    end if
+    if cx.ast.nodes[e].bind == BInout then
+      return "(*p_" ++ nname(cx, e) ++ ")"
+    end if
+    if cx.ast.nodes[e].bind == BConst then
+      return "g_" ++ nname(cx, e)
+    end if
+    return "v_" ++ nname(cx, e)
+  end if
+  if k == NInout then
+    return gx(inout g, cx, ckid(cx, e, 0), fname)
+  end if
+  if k == NRec then
+    var vals: [Int] = []
+    for i in 0 ..< cnk(cx, e) do
+      push(vals, ckid(cx, ckid(cx, e, i), 0))
+    end for
+    let codes = gen_list(inout g, cx, vals, fname)
+    let sq = seq_parts(inout g, cx, vals, codes)
+    var inits: [Str] = []
+    for j in 0 ..< cnk(cx, e) do
+      push(inits, ".f_" ++ nname(cx, ckid(cx, e, j)) ++ " = " ++ sq.vals[j])
+    end for
+    return seq_wrap(sq, "((R_" ++ nname(cx, e) ++ "){ " ++ join(inits, ", ") ++ " })")
+  end if
+  if k == NArr then
+    let a = new_tmp(inout g)
+    let et = ctype(cx, cx.tys[cx.ast.nodes[e].ty].el)
+    var sets: [Str] = []
+    for i2 in 0 ..< cnk(cx, e) do
+      let item = gx(inout g, cx, ckid(cx, e, i2), fname)
+      push(sets, "((" ++ et ++ "*)" ++ a ++ "->data)[" ++ show(i2) ++ "] = " ++ item ++ ";")
+    end for
+    return "({ cn_arr* " ++ a ++ " = cn_arr_new(" ++ show(cnk(cx, e)) ++ ", sizeof(" ++ et ++ ")); " ++ join(sets, " ") ++ " " ++ a ++ "; })"
+  end if
+  if k == NIndex then
+    let et2 = ctype(cx, cx.ast.nodes[e].ty)
+    let base = ckid(cx, e, 0)
+    let idx = ckid(cx, e, 1)
+    if nkind(cx, base) == NIdent and cx.ast.nodes[base].bind != BInout and cx.ast.nodes[base].bind != BConst and simple(cx, idx) then
+      let bn = "v_" ++ nname(cx, base)
+      let ic = gx(inout g, cx, idx, fname)
+      return "((" ++ et2 ++ "*)" ++ bn ++ "->data)[cn_at(" ++ bn ++ ", " ++ ic ++ ", " ++ loc(cx, fname, e) ++ ")]"
+    end if
+    let ta = new_tmp(inout g)
+    let ti = new_tmp(inout g)
+    let bc = gx(inout g, cx, base, fname)
+    let ic2 = gx(inout g, cx, idx, fname)
+    return "({ cn_arr* " ++ ta ++ " = " ++ bc ++ "; int64_t " ++ ti ++ " = cn_at(" ++ ta ++ ", " ++ ic2 ++ ", " ++ loc(cx, fname, e) ++ "); ((" ++ et2 ++ "*)" ++ ta ++ "->data)[" ++ ti ++ "]; })"
+  end if
+  if k == NField then
+    return "(" ++ gx(inout g, cx, ckid(cx, e, 0), fname) ++ ").f_" ++ nname(cx, e)
+  end if
+  if k == NUn then
+    let xc = gx(inout g, cx, ckid(cx, e, 0), fname)
+    if nname(cx, e) == "not" then
+      return "(!" ++ xc ++ ")"
+    end if
+    return "(-" ++ xc ++ ")"
+  end if
+  if k == NBin then
+    return gx_bin(inout g, cx, e, fname)
+  end if
+  if k == NCall then
+    return gx_call(inout g, cx, e, fname)
+  end if
+  return "/* ? " ++ show(k) ++ " */"
+end fn gx_inner
+
+fn gx_bin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+  let op = nname(cx, e)
+  let l = ckid(cx, e, 0)
+  let r = ckid(cx, e, 1)
+  if op == "and" or op == "or" then
+    let lc = gx(inout g, cx, l, fname)
+    let rc = gx(inout g, cx, r, fname)
+    var cop = " && "
+    if op == "or" then
+      cop = " || "
+    end if
+    return "(" ++ lc ++ cop ++ rc ++ ")"
+  end if
+  let lt = cx.ast.nodes[l].ty
+  let codes = gen_list(inout g, cx, [l, r], fname)
+  let sq = seq_parts(inout g, cx, [l, r], codes)
+  let a = sq.vals[0]
+  let b = sq.vals[1]
+  if op == "++" then
+    return seq_wrap(sq, "cn_cat(" ++ a ++ ", " ++ b ++ ")")
+  end if
+  if lt == T_STR then
+    var neg = ""
+    if op == "!=" then
+      neg = "!"
+    end if
+    return seq_wrap(sq, neg ++ "cn_str_eq(" ++ a ++ ", " ++ b ++ ")")
+  end if
+  if str_in(op, ["==", "!=", "<", "<=", ">", ">="]) or lt == T_FLOAT then
+    return seq_wrap(sq, "(" ++ a ++ " " ++ op ++ " " ++ b ++ ")")
+  end if
+  if op == "*" then
+    return seq_wrap(sq, "cn_mul(" ++ a ++ ", " ++ b ++ ", " ++ loc(cx, fname, e) ++ ")")
+  end if
+  if op == "/" then
+    return seq_wrap(sq, "cn_div(" ++ a ++ ", " ++ b ++ ", " ++ loc(cx, fname, e) ++ ")")
+  end if
+  if op == "%" then
+    return seq_wrap(sq, "cn_mod(" ++ a ++ ", " ++ b ++ ", " ++ loc(cx, fname, e) ++ ")")
+  end if
+  return seq_wrap(sq, "cn_ovf(" ++ a ++ " " ++ op ++ " " ++ b ++ ", " ++ loc(cx, fname, e) ++ ")")
+end fn gx_bin
+
+fn gx_call(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+  let name = nname(cx, e)
+  let what = cx.ast.nodes[e].what
+  let args = kid_list(cx, e)
+  if what == RVariant then
+    if len(args) == 0 then
+      return "(&cn_V_" ++ name ++ ")"
+    end if
+    let codes = gen_list(inout g, cx, args, fname)
+    let sq = seq_parts(inout g, cx, args, codes)
+    return seq_wrap(sq, "mk_" ++ name ++ "(" ++ join(sq.vals, ", ") ++ ")")
+  end if
+  if what == RBuiltin then
+    return gx_builtin(inout g, cx, e, fname)
+  end if
+  var any_inout = false
+  for a in args do
+    if nkind(cx, a) == NInout then
+      any_inout = true
+    end if
+  end for
+  if any_inout then
+    var pre: [Str] = []
+    var argv: [Str] = []
+    for a2 in args do
+      if nkind(cx, a2) == NInout then
+        let inner = ckid(cx, a2, 0)
+        let pl = place(inout g, cx, inner, fname)
+        let pt = new_tmp(inout g)
+        for ps in pl.pre do
+          push(pre, ps)
+        end for
+        push(pre, ctype(cx, cx.ast.nodes[inner].ty) ++ "* " ++ pt ++ " = &(" ++ pl.lv ++ ");")
+        push(argv, pt)
+      else
+        let t = new_tmp(inout g)
+        let code = gx(inout g, cx, a2, fname)
+        push(pre, ctype(cx, cx.ast.nodes[a2].ty) ++ " " ++ t ++ " = " ++ code ++ ";")
+        push(argv, t)
+      end if
+    end for
+    return "({ " ++ join(pre, " ") ++ " f_" ++ name ++ "(" ++ join(argv, ", ") ++ "); })"
+  end if
+  let codes2 = gen_list(inout g, cx, args, fname)
+  let sq2 = seq_parts(inout g, cx, args, codes2)
+  return seq_wrap(sq2, "f_" ++ name ++ "(" ++ join(sq2.vals, ", ") ++ ")")
+end fn gx_call
+
+fn gx_builtin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
+  let name = nname(cx, e)
+  let args = kid_list(cx, e)
+  if name == "push" then
+    let a0 = ckid(cx, e, 0)
+    let a1 = ckid(cx, e, 1)
+    let et = ctype(cx, cx.ast.nodes[a1].ty)
+    let ta = new_tmp(inout g)
+    let tv = new_tmp(inout g)
+    let pl = place(inout g, cx, a0, fname)
+    var target = pl.lv
+    if len(pl.pre) > 0 then
+      target = "({ " ++ join(pl.pre, " ") ++ " " ++ pl.lv ++ "; })"
+    end if
+    let vc = gx(inout g, cx, a1, fname)
+    return "({ cn_arr* " ++ ta ++ " = " ++ target ++ "; " ++ et ++ " " ++ tv ++ " = " ++ vc ++ "; *(" ++ et ++ "*)cn_arr_grow(" ++ ta ++ ", sizeof(" ++ et ++ ")) = " ++ tv ++ "; })"
+  end if
+  if name == "pop" then
+    let pet = ctype(cx, cx.ast.nodes[e].ty)
+    let pa = new_tmp(inout g)
+    let ppl = place(inout g, cx, args[0], fname)
+    var ptarget = ppl.lv
+    if len(ppl.pre) > 0 then
+      ptarget = "({ " ++ join(ppl.pre, " ") ++ " " ++ ppl.lv ++ "; })"
+    end if
+    return "({ cn_arr* " ++ pa ++ " = " ++ ptarget ++ "; if (" ++ pa ++ "->len == 0) cn_trap(" ++ loc(cx, fname, e) ++ ", \"pop from empty array\"); ((" ++ pet ++ "*)" ++ pa ++ "->data)[--" ++ pa ++ "->len]; })"
+  end if
+  if name == "array" then
+    let el = cx.tys[cx.ast.nodes[e].ty].el
+    let et2 = ctype(cx, el)
+    let tn = new_tmp(inout g)
+    let tv2 = new_tmp(inout g)
+    let tarr = new_tmp(inout g)
+    var fill = tv2
+    if needs_copy_c(cx, el) then
+      fill = copy_fn(inout g, cx, el) ++ "(" ++ tv2 ++ ")"
+    end if
+    let nc = gx(inout g, cx, args[0], fname)
+    let vc2 = gx(inout g, cx, args[1], fname)
+    return "({ int64_t " ++ tn ++ " = " ++ nc ++ "; " ++ et2 ++ " " ++ tv2 ++ " = " ++ vc2 ++ "; if (" ++ tn ++ " < 0) cn_trap(" ++ loc(cx, fname, e) ++ ", \"array: negative length %lld\", (long long)" ++ tn ++ "); cn_arr* " ++ tarr ++ " = cn_arr_new(" ++ tn ++ ", sizeof(" ++ et2 ++ ")); for (int64_t i = 0; i < " ++ tn ++ "; i++) ((" ++ et2 ++ "*)" ++ tarr ++ "->data)[i] = " ++ fill ++ "; " ++ tarr ++ "; })"
+  end if
+  if name == "assert" then
+    let msg = c_str("assertion failed: " ++ src_of(cx, args[0]))
+    return "({ if (!(" ++ gx(inout g, cx, args[0], fname) ++ ")) cn_trap(" ++ loc(cx, fname, e) ++ ", \"%s\", " ++ msg ++ "); })"
+  end if
+  let codes = gen_list(inout g, cx, args, fname)
+  if name == "print" then
+    return "cn_print(" ++ codes[0] ++ ")"
+  end if
+  if name == "show" then
+    let at = cx.ast.nodes[args[0]].ty
+    if tk(cx, at) == YEnum then
+      return "cn_names_" ++ cx.tys[at].name ++ "[(" ++ codes[0] ++ ")->tag]"
+    end if
+    if at == T_INT then
+      return "cn_show_i(" ++ codes[0] ++ ")"
+    else if at == T_FLOAT then
+      return "cn_show_f(" ++ codes[0] ++ ")"
+    else if at == T_BOOL then
+      return "cn_show_b(" ++ codes[0] ++ ")"
+    end if
+    return "(" ++ codes[0] ++ ")"
+  end if
+  if name == "len" then
+    if cx.ast.nodes[args[0]].ty == T_STR then
+      return "(" ++ codes[0] ++ ").len"
+    end if
+    return "(" ++ codes[0] ++ ")->len"
+  end if
+  if name == "to_float" then
+    return "((double)" ++ codes[0] ++ ")"
+  end if
+  if name == "to_int" then
+    return "cn_to_int(" ++ codes[0] ++ ", " ++ loc(cx, fname, e) ++ ")"
+  end if
+  if name == "sqrt" then
+    return "sqrt(" ++ codes[0] ++ ")"
+  end if
+  if name == "clock_ms" then
+    return "cn_clock_ms()"
+  end if
+  if name == "args" then
+    return "cn_args()"
+  end if
+  if name == "from_byte" then
+    return "cn_from_byte(" ++ codes[0] ++ ", " ++ loc(cx, fname, e) ++ ")"
+  end if
+  if name == "parse_float" then
+    return "cn_parse_float(" ++ codes[0] ++ ", " ++ loc(cx, fname, e) ++ ")"
+  end if
+  if name == "eprint" then
+    return "cn_eprint(" ++ codes[0] ++ ")"
+  end if
+  if name == "exit" then
+    return "cn_exit(" ++ codes[0] ++ ")"
+  end if
+  if name == "read_file" then
+    return "cn_read_file(" ++ codes[0] ++ ", " ++ loc(cx, fname, e) ++ ")"
+  end if
+  let sq = seq_parts(inout g, cx, args, codes)
+  if name == "byte_at" then
+    return seq_wrap(sq, "cn_byte_at(" ++ sq.vals[0] ++ ", " ++ sq.vals[1] ++ ", " ++ loc(cx, fname, e) ++ ")")
+  end if
+  if name == "slice" then
+    return seq_wrap(sq, "cn_slice(" ++ sq.vals[0] ++ ", " ++ sq.vals[1] ++ ", " ++ sq.vals[2] ++ ", " ++ loc(cx, fname, e) ++ ")")
+  end if
+  if name == "join" then
+    return seq_wrap(sq, "cn_join(" ++ sq.vals[0] ++ ", " ++ sq.vals[1] ++ ")")
+  end if
+  # write_file
+  return seq_wrap(sq, "cn_write_file(" ++ sq.vals[0] ++ ", " ++ sq.vals[1] ++ ", " ++ loc(cx, fname, e) ++ ")")
+end fn gx_builtin
+
+# place -> statements to run first + an lvalue
+fn place(inout g: G, cx: Cx, e: Int, fname: Str) -> Place
+  let k = nkind(cx, e)
+  if k == NIdent then
+    if cx.ast.nodes[e].bind == BInout then
+      return Place { pre: [], lv: "(*p_" ++ nname(cx, e) ++ ")" }
+    end if
+    return Place { pre: [], lv: "v_" ++ nname(cx, e) }
+  end if
+  let inner = place(inout g, cx, ckid(cx, e, 0), fname)
+  if k == NField then
+    return Place { pre: inner.pre, lv: inner.lv ++ ".f_" ++ nname(cx, e) }
+  end if
+  let ta = new_tmp(inout g)
+  let ti = new_tmp(inout g)
+  let et = ctype(cx, cx.ast.nodes[e].ty)
+  let ic = gx(inout g, cx, ckid(cx, e, 1), fname)
+  var pre = inner.pre
+  push(pre, "cn_arr* " ++ ta ++ " = " ++ inner.lv ++ ";")
+  push(pre, "int64_t " ++ ti ++ " = cn_at(" ++ ta ++ ", " ++ ic ++ ", " ++ loc(cx, fname, e) ++ ");")
+  return Place { pre: pre, lv: "((" ++ et ++ "*)" ++ ta ++ "->data)[" ++ ti ++ "]" }
+end fn place
+
+# ---------- statements ----------
+
+fn gen_block(inout g: G, cx: Cx, block: Int, fname: Str, ind: Int) -> Str
+  var out: [Str] = []
+  for i in 0 ..< cnk(cx, block) do
+    push(out, gen_stmt(inout g, cx, ckid(cx, block, i), fname, ind))
+  end for
+  return join(out, "")
+end fn gen_block
+
+fn gen_stmt(inout g: G, cx: Cx, s: Int, fname: Str, ind: Int) -> Str
+  let pad = repeat_str("  ", ind)
+  let k = nkind(cx, s)
+  if k == NLet then
+    let init = gx(inout g, cx, ckid(cx, s, 1), fname)
+    if nname(cx, s) == "_" then
+      return pad ++ "(void)(" ++ init ++ ");\n"
+    end if
+    return pad ++ ctype(cx, cx.ast.nodes[s].ty) ++ " v_" ++ nname(cx, s) ++ " = " ++ init ++ ";\n"
+  end if
+  if k == NAssign then
+    let pl = place(inout g, cx, ckid(cx, s, 0), fname)
+    let v = new_tmp(inout g)
+    let value = ckid(cx, s, 1)
+    let vc = gx(inout g, cx, value, fname)
+    return pad ++ "{ " ++ join(pl.pre, " ") ++ " " ++ ctype(cx, cx.ast.nodes[value].ty) ++ " " ++ v ++ " = " ++ vc ++ "; " ++ pl.lv ++ " = " ++ v ++ "; }\n"
+  end if
+  if k == NExpr then
+    return pad ++ gx(inout g, cx, ckid(cx, s, 0), fname) ++ ";\n"
+  end if
+  if k == NIf then
+    var o: [Str] = []
+    for a in 0 ..< if_arms(cx, s) do
+      let cond = gx(inout g, cx, ckid(cx, s, a * 2), fname)
+      let body = gen_block(inout g, cx, ckid(cx, s, a * 2 + 1), fname, ind + 1)
+      if a == 0 then
+        push(o, pad ++ "if (" ++ cond ++ ") {\n" ++ body ++ pad ++ "}")
+      else
+        push(o, " else if (" ++ cond ++ ") {\n" ++ body ++ pad ++ "}")
+      end if
+    end for
+    if cx.ast.nodes[s].flag then
+      let eb = gen_block(inout g, cx, ckid(cx, s, cnk(cx, s) - 1), fname, ind + 1)
+      push(o, " else {\n" ++ eb ++ pad ++ "}")
+    end if
+    return join(o, "") ++ "\n"
+  end if
+  if k == NWhile then
+    let wc = gx(inout g, cx, ckid(cx, s, 0), fname)
+    let wb = gen_block(inout g, cx, ckid(cx, s, 1), fname, ind + 1)
+    return pad ++ "while (" ++ wc ++ ") {\n" ++ wb ++ pad ++ "}\n"
+  end if
+  if k == NFor then
+    let lv = "v_" ++ nname(cx, s)
+    if cx.ast.nodes[s].ival == 1 then
+      let te = new_tmp(inout g)
+      let sc = gx(inout g, cx, ckid(cx, s, 0), fname)
+      let ec = gx(inout g, cx, ckid(cx, s, 1), fname)
+      var cmp = " < "
+      if cx.ast.nodes[s].flag then
+        cmp = " <= "
+      end if
+      let fb = gen_block(inout g, cx, ckid(cx, s, 2), fname, ind + 1)
+      return pad ++ "for (int64_t " ++ lv ++ " = " ++ sc ++ ", " ++ te ++ " = " ++ ec ++ "; " ++ lv ++ cmp ++ te ++ "; " ++ lv ++ "++) {\n" ++ fb ++ pad ++ "}\n"
+    end if
+    let ta = new_tmp(inout g)
+    let tk2 = new_tmp(inout g)
+    let et = ctype(cx, cx.ast.nodes[s].ty)
+    let ic = gx(inout g, cx, ckid(cx, s, 0), fname)
+    let ib = gen_block(inout g, cx, ckid(cx, s, 1), fname, ind + 1)
+    return pad ++ "{ cn_arr* " ++ ta ++ " = " ++ ic ++ ";\n" ++ pad ++ "for (int64_t " ++ tk2 ++ " = 0; " ++ tk2 ++ " < " ++ ta ++ "->len; " ++ tk2 ++ "++) {\n" ++ pad ++ "  " ++ et ++ " " ++ lv ++ " = ((" ++ et ++ "*)" ++ ta ++ "->data)[" ++ tk2 ++ "];\n" ++ ib ++ pad ++ "} }\n"
+  end if
+  if k == NMatch then
+    return gen_match(inout g, cx, s, fname, ind)
+  end if
+  if k == NReturn then
+    if cnk(cx, s) > 0 then
+      return pad ++ "return " ++ gx(inout g, cx, ckid(cx, s, 0), fname) ++ ";\n"
+    end if
+    return pad ++ "return;\n"
+  end if
+  if k == NBreak then
+    return pad ++ "break;\n"
+  end if
+  return pad ++ "continue;\n"
+end fn gen_stmt
+
+fn gen_match(inout g: G, cx: Cx, s: Int, fname: Str, ind: Int) -> Str
+  let pad = repeat_str("  ", ind)
+  let m = new_tmp(inout g)
+  let scrut = ckid(cx, s, 0)
+  var o = [pad ++ "{ " ++ ctype(cx, cx.ast.nodes[scrut].ty) ++ " " ++ m ++ " = " ++ gx(inout g, cx, scrut, fname) ++ ";\n"]
+  let n = cnk(cx, s)
+  for i in 1 ..< n do
+    let c = ckid(cx, s, i)
+    let wild = nname(cx, c) == "_"
+    let last = i == n - 1
+    let v = cx.ast.nodes[c].ref
+    var cond = ""
+    if not wild and not (last and cx.ast.nodes[s].exh) then
+      cond = m ++ "->tag == " ++ show(cx.ast.nodes[v].ival)
+    end if
+    var head = ""
+    if i == 1 then
+      if cond != "" then
+        head = pad ++ "if (" ++ cond ++ ") "
+      else
+        head = pad
+      end if
+    else
+      if cond != "" then
+        head = " else if (" ++ cond ++ ") "
+      else
+        head = " else "
+      end if
+    end if
+    var binds: [Str] = []
+    if not wild then
+      for j in 1 ..< cnk(cx, c) do
+        let bname = nname(cx, ckid(cx, c, j))
+        if bname != "_" then
+          let fd = ckid(cx, v, j - 1)
+          push(binds, pad ++ "  " ++ ctype(cx, cx.ast.nodes[fd].ty) ++ " v_" ++ bname ++ " = " ++ m ++ "->u.V_" ++ nname(cx, v) ++ ".f_" ++ nname(cx, fd) ++ ";\n")
+        end if
+      end for
+    end if
+    let body = gen_block(inout g, cx, ckid(cx, c, 0), fname, ind + 1)
+    push(o, head ++ "{\n" ++ join(binds, "") ++ body ++ pad ++ "}")
+  end for
+  push(o, "\n" ++ pad ++ "}\n")
+  return join(o, "")
+end fn gen_match
+
+# ---------- program ----------
+
+fn emit_record(cx: Cx, name: Str, inout done: [Str], inout out: [Str])
+  if str_in(name, done) then
+    return
+  end if
+  push(done, name)
+  let d = map_get(cx.types, name)
+  var fields: [Str] = []
+  for i in 0 ..< cnk(cx, d) do
+    let f = ckid(cx, d, i)
+    let ft = cx.ast.nodes[f].ty
+    if tk(cx, ft) == YRec then
+      emit_record(cx, cx.tys[ft].name, inout done, inout out)
+    end if
+    push(fields, ctype(cx, ft) ++ " f_" ++ nname(cx, f) ++ ";")
+  end for
+  push(out, "struct R_" ++ name ++ " { " ++ join(fields, " ") ++ " };")
+end fn emit_record
+
+fn gen_program(cx: Cx) -> Str
+  var g = G { tmp: 0, copy_names: [], copy_protos: [], copy_bodies: [] }
+  var head = ["#include \"candor_rt.h\""]
+  for tname in cx.types.keys do
+    if nkind(cx, map_get(cx.types, tname)) == NRecord then
+      push(head, "typedef struct R_" ++ tname ++ " R_" ++ tname ++ ";")
+    else
+      push(head, "typedef struct E_" ++ tname ++ " E_" ++ tname ++ ";")
+    end if
+  end for
+  var done: [Str] = []
+  for tname2 in cx.types.keys do
+    if nkind(cx, map_get(cx.types, tname2)) == NRecord then
+      emit_record(cx, tname2, inout done, inout head)
+    end if
+  end for
+  for tname3 in cx.types.keys do
+    let td = map_get(cx.types, tname3)
+    if nkind(cx, td) == NEnum then
+      var members: [Str] = []
+      for vi in 0 ..< cnk(cx, td) do
+        let v = ckid(cx, td, vi)
+        if cnk(cx, v) > 0 then
+          var fs: [Str] = []
+          for fi in 0 ..< cnk(cx, v) do
+            let f = ckid(cx, v, fi)
+            push(fs, ctype(cx, cx.ast.nodes[f].ty) ++ " f_" ++ nname(cx, f) ++ ";")
+          end for
+          push(members, "struct { " ++ join(fs, " ") ++ " } V_" ++ nname(cx, v) ++ ";")
+        end if
+      end for
+      var un = ""
+      if len(members) > 0 then
+        un = " union { " ++ join(members, " ") ++ " } u;"
+      end if
+      push(head, "struct E_" ++ tname3 ++ " { int tag;" ++ un ++ " };")
+      var names: [Str] = []
+      for vi3 in 0 ..< cnk(cx, td) do
+        let vn3 = nname(cx, ckid(cx, td, vi3))
+        push(names, "CN_S(\"" ++ vn3 ++ "\", " ++ show(len(vn3)) ++ ")")
+      end for
+      push(head, "static const cn_str cn_names_" ++ tname3 ++ "[] = { " ++ join(names, ", ") ++ " };")
+      for vi2 in 0 ..< cnk(cx, td) do
+        let v2 = ckid(cx, td, vi2)
+        let vname = nname(cx, v2)
+        if cnk(cx, v2) == 0 then
+          push(head, "static E_" ++ tname3 ++ " cn_V_" ++ vname ++ " = { " ++ show(vi2) ++ " };")
+        else
+          var ps: [Str] = []
+          var sets: [Str] = []
+          for fi2 in 0 ..< cnk(cx, v2) do
+            let f2 = ckid(cx, v2, fi2)
+            push(ps, ctype(cx, cx.ast.nodes[f2].ty) ++ " a" ++ show(fi2))
+            push(sets, "p->u.V_" ++ vname ++ ".f_" ++ nname(cx, f2) ++ " = a" ++ show(fi2) ++ ";")
+          end for
+          push(head, "static E_" ++ tname3 ++ "* mk_" ++ vname ++ "(" ++ join(ps, ", ") ++ ") { E_" ++ tname3 ++ "* p = cn_alloc(sizeof *p); p->tag = " ++ show(vi2) ++ "; " ++ join(sets, " ") ++ " return p; }")
+        end if
+      end for
+    end if
+  end for
+  var protos: [Str] = []
+  var bodies: [Str] = []
+  for f in cx.fn_list do
+    gen_fn(inout g, cx, f, inout protos, inout bodies)
+  end for
+  var globals: [Str] = []
+  var inits: [Str] = []
+  for c in cx.const_nodes do
+    push(globals, "static " ++ ctype(cx, cx.ast.nodes[c].ty) ++ " g_" ++ nname(cx, c) ++ ";")
+    push(inits, "  g_" ++ nname(cx, c) ++ " = " ++ gx(inout g, cx, ckid(cx, c, 1), nname(cx, c)) ++ ";\n")
+  end for
+  var out = head
+  for cp in g.copy_protos do
+    push(out, cp)
+  end for
+  for pr in protos do
+    push(out, pr)
+  end for
+  for gl in globals do
+    push(out, gl)
+  end for
+  for cb in g.copy_bodies do
+    push(out, cb)
+  end for
+  for bd in bodies do
+    push(out, bd)
+  end for
+  push(out, "static void cn_init(void) {\n" ++ join(inits, "") ++ "}")
+  push(out, "int main(int argc, char** argv) { cn_argc = argc; cn_argv = argv; cn_init(); f_main(); fflush(stdout); return 0; }")
+  return join(out, "\n") ++ "\n"
+end fn gen_program
+
+fn gen_fn(inout g: G, cx: Cx, f: Int, inout protos: [Str], inout bodies: [Str])
+  let name = nname(cx, f)
+  let rt = ctype(cx, cx.ast.nodes[f].ty)
+  let ps = fn_params(cx.ast, f)
+  var params: [Str] = []
+  var argnames: [Str] = []
+  for i in 0 ..< cnk(cx, ps) do
+    let pn = ckid(cx, ps, i)
+    let pt = ctype(cx, cx.ast.nodes[pn].ty)
+    if cx.ast.nodes[pn].flag then
+      push(params, pt ++ "* p_" ++ nname(cx, pn))
+      push(argnames, "p_" ++ nname(cx, pn))
+    else
+      push(params, pt ++ " v_" ++ nname(cx, pn))
+      push(argnames, "v_" ++ nname(cx, pn))
+    end if
+  end for
+  var plist = join(params, ", ")
+  if plist == "" then
+    plist = "void"
+  end if
+  let rq = fn_requires(cx.ast, f)
+  let es = fn_ensures(cx.ast, f)
+  let contracts = cnk(cx, rq) > 0 or cnk(cx, es) > 0
+  var body_name = "f_" ++ name
+  if contracts then
+    body_name = "f_" ++ name ++ "__body"
+  end if
+  push(protos, "static " ++ rt ++ " " ++ body_name ++ "(" ++ plist ++ ");")
+  var tail = ""
+  if cx.ast.nodes[f].ty != T_UNIT then
+    tail = "  cn_trap(\"" ++ name ++ "\", " ++ show(cx.ast.nodes[f].line) ++ ", \"missing return\");\n"
+  end if
+  let body = gen_block(inout g, cx, fn_body(cx.ast, f), name, 1)
+  push(bodies, "static " ++ rt ++ " " ++ body_name ++ "(" ++ plist ++ ") {\n" ++ body ++ tail ++ "}")
+  if contracts then
+    push(protos, "static " ++ rt ++ " f_" ++ name ++ "(" ++ plist ++ ");")
+    var w = ["static " ++ rt ++ " f_" ++ name ++ "(" ++ plist ++ ") {\n"]
+    for i2 in 0 ..< cnk(cx, rq) do
+      let r = ckid(cx, rq, i2)
+      push(w, "  if (!(" ++ gx(inout g, cx, r, name) ++ ")) cn_trap(" ++ loc(cx, name, r) ++ ", \"%s\", " ++ c_str("requires failed: " ++ src_of(cx, r)) ++ ");\n")
+    end for
+    if rt == "void" then
+      push(w, "  " ++ body_name ++ "(" ++ join(argnames, ", ") ++ ");\n")
+    else
+      push(w, "  " ++ rt ++ " v_result = " ++ body_name ++ "(" ++ join(argnames, ", ") ++ ");\n")
+    end if
+    for i3 in 0 ..< cnk(cx, es) do
+      let en = ckid(cx, es, i3)
+      push(w, "  if (!(" ++ gx(inout g, cx, en, name) ++ ")) cn_trap(" ++ loc(cx, name, en) ++ ", \"%s\", " ++ c_str("ensures failed: " ++ src_of(cx, en)) ++ ");\n")
+    end for
+    if rt != "void" then
+      push(w, "  return v_result;\n")
+    end if
+    push(w, "}")
+    push(bodies, join(w, ""))
+  end if
+end fn gen_fn

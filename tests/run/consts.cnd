@@ -1,0 +1,40 @@
+let LIMIT: Int = 10
+let HALF: Float = to_float(LIMIT) / 2.0
+let GREETING: Str = "hello" ++ ", " ++ "world"
+let PRIMES: [Int] = [2, 3, 5, 7]
+let START: Light = Green
+
+type Light = enum
+  Red
+  Green
+end type Light
+
+fn clamp_to_limit(x: Int) -> Int
+  ensures result <= LIMIT
+  example clamp_to_limit(99) == LIMIT
+  if x > LIMIT then
+    return LIMIT
+  end if
+  return x
+end fn clamp_to_limit
+
+fn main()
+  effects io
+  print(GREETING ++ " " ++ show(HALF) ++ " " ++ show(START))
+  print(show(clamp_to_limit(50)) ++ " " ++ show(clamp_to_limit(3)))
+  var ps = PRIMES
+  push(ps, 11)
+  print(show(len(PRIMES)) ++ " " ++ show(len(ps)))
+  var stack: [[Int]] = [[1], [2, 3]]
+  let top = pop(stack)
+  push(stack[0], 9)
+  print(show(len(top)) ++ " " ++ show(len(stack)) ++ " " ++ show(stack[0][1]))
+  var xs = [1, 2, 3]
+  var total = 0
+  while len(xs) > 0 do
+    total = total + pop(xs)
+  end while
+  print(show(total))
+  let last = pop(xs)
+  print("unreachable " ++ show(last))
+end fn main

@@ -1,0 +1,92 @@
+type Point = record
+  x: Float
+  y: Float
+  x: Int
+end type Point
+
+type Node = record
+  next: Node
+end type Node
+
+type Color = enum
+  Red
+  Green(level: Int)
+end type Color
+
+type Other = enum
+  Red
+end type Other
+
+fn bad_types(a: Int, a: Str) -> Int
+  effects networking
+  let p = Point { x: 1, z: 2.0 }
+  let q = Pont { x: 1.0 }
+  let s: Strr = "x"
+  let u = Point { x: 1.0, y: 2.0 }
+  let w = u.zz
+  let v = a + 1.5
+  let t = "a" + "b"
+  let r = [1, "x"]
+  let e = []
+  let h = ?what
+  let c = Green
+  let k = [1, 2]
+  k[0] = 3
+  for i in 0 ..< 3 do
+    i = 4
+  end for
+  break
+  if 1 then
+    return 1
+  end if
+  a == 3
+  bad_types(1)
+  nosuch(1)
+  print("x")
+  return "x"
+end fn bad_types
+
+fn no_ret(c: Color) -> Int
+  match c
+    case Red
+      return 1
+  end match
+end fn no_ret
+
+fn dup_match(c: Color) -> Int
+  match c
+    case Red
+      return 1
+    case Red
+      return 2
+    case Blue
+      return 3
+    case _
+      return 4
+    case Green(a, b)
+      return 5
+  end match
+end fn dup_match
+
+fn cmp(c: Color) -> Bool
+  ensures result
+  example cmp(Red)
+  return c == c
+end fn cmp
+
+fn print(x: Int)
+end fn print
+
+fn main(x: Int) -> Int
+  let r = show([1])
+  let l = len(3)
+  var xs = [1]
+  push(3, 4)
+  push(xs, "s")
+  let y = sqrt(2)
+  let z = clock_ms()
+  let un = main(1)
+  let q = no_ret(Red)
+  q
+  return 0
+end fn main

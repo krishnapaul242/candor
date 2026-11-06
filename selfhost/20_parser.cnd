@@ -1,0 +1,875 @@
+# ===================== AST + parser =====================
+# The AST is an arena: nodes live in one array and refer to children by index
+# through a shared `kids` array. Checker annotations are written into the nodes.
+
+type Node = record
+  kind: NodeKind
+  line: Int
+  col: Int
+  start: Int     # source span (for contract / assert messages)
+  stop: Int
+  name: Str
+  ival: Int
+  fval: Float
+  sval: Str
+  flag: Bool
+  k0: Int        # first child in Ast.kids
+  nk: Int        # number of children
+  ty: Int        # checker: type id
+  bind: Bind     # checker
+  ref: Int       # checker: referenced decl node (variant / fn), -1 if none
+  what: RefKind  # checker
+  copy: Bool     # checker: copy this whole read of a var place
+  copy_in: Bool  # checker: copy because the value escapes
+  exh: Bool      # checker: match is exhaustive
+end type Node
+
+type Ast = record
+  nodes: [Node]
+  kids: [Int]
+end type Ast
+
+fn kid(a: Ast, n: Int, i: Int) -> Int
+  return a.kids[a.nodes[n].k0 + i]
+end fn kid
+
+fn nkids(a: Ast, n: Int) -> Int
+  return a.nodes[n].nk
+end fn nkids
+
+# fn node children: params, ret type (-1 = Unit), requires, ensures, examples, effects, body
+fn fn_params(a: Ast, f: Int) -> Int
+  return kid(a, f, 0)
+end fn fn_params
+
+fn fn_ret(a: Ast, f: Int) -> Int
+  return kid(a, f, 1)
+end fn fn_ret
+
+fn fn_requires(a: Ast, f: Int) -> Int
+  return kid(a, f, 2)
+end fn fn_requires
+
+fn fn_ensures(a: Ast, f: Int) -> Int
+  return kid(a, f, 3)
+end fn fn_ensures
+
+fn fn_examples(a: Ast, f: Int) -> Int
+  return kid(a, f, 4)
+end fn fn_examples
+
+fn fn_effects(a: Ast, f: Int) -> Int
+  return kid(a, f, 5)
+end fn fn_effects
+
+fn fn_body(a: Ast, f: Int) -> Int
+  return kid(a, f, 6)
+end fn fn_body
+
+type P = record
+  toks: [Tok]
+  pos: Int
+  src: Str
+  ast: Ast
+  failed: Bool
+  err: Diag
+end type P
+
+# ---------- token helpers ----------
+
+fn tkind(p: P) -> TokKind
+  return p.toks[p.pos].kind
+end fn tkind
+
+fn ttext(p: P) -> Str
+  return p.toks[p.pos].text
+end fn ttext
+
+fn at_op(p: P, v: Str) -> Bool
+  return p.toks[p.pos].kind == TOp and p.toks[p.pos].text == v
+end fn at_op
+
+fn at_kw(p: P, v: Str) -> Bool
+  return p.toks[p.pos].kind == TKw and p.toks[p.pos].text == v
+end fn at_kw
+
+fn at_kind(p: P, k: TokKind) -> Bool
+  return p.toks[p.pos].kind == k
+end fn at_kind
+
+fn next_tok(inout p: P) -> Int
+  let i = p.pos
+  if p.pos < len(p.toks) - 1 then
+    p.pos = p.pos + 1
+  end if
+  return i
+end fn next_tok
+
+fn describe(t: Tok) -> Str
+  if t.kind == TNl then
+    return "end of line"
+  end if
+  if t.kind == TEof then
+    return "end of file"
+  end if
+  if t.kind == TStr then
+    return "string \"" ++ t.text ++ "\""
+  end if
+  return "'" ++ t.text ++ "'"
+end fn describe
+
+fn fail_at(inout p: P, code: Str, line: Int, col: Int, msg: Str, hint: Str)
+  if not p.failed then
+    p.failed = true
+    p.err = Diag { code: code, msg: msg, hint: hint, line: line, col: col }
+  end if
+end fn fail_at
+
+fn fail(inout p: P, msg: Str, hint: Str)
+  let line = p.toks[p.pos].line
+  let col = p.toks[p.pos].col
+  fail_at(inout p, "syntax", line, col, msg, hint)
+end fn fail
+
+fn found(p: P) -> Str
+  return describe(p.toks[p.pos])
+end fn found
+
+fn expect_op(inout p: P, v: Str, what: Str) -> Bool
+  if p.failed then
+    return false
+  end if
+  if not at_op(p, v) then
+    var w = what
+    if w == "" then
+      w = "'" ++ v ++ "'"
+    end if
+    fail(inout p, "expected " ++ w ++ ", found " ++ found(p), "")
+    return false
+  end if
+  let _ = next_tok(inout p)
+  return true
+end fn expect_op
+
+fn expect_kw(inout p: P, v: Str, what: Str) -> Bool
+  if p.failed then
+    return false
+  end if
+  if not at_kw(p, v) then
+    var w = what
+    if w == "" then
+      w = "'" ++ v ++ "'"
+    end if
+    fail(inout p, "expected " ++ w ++ ", found " ++ found(p), "")
+    return false
+  end if
+  let _ = next_tok(inout p)
+  return true
+end fn expect_kw
+
+# Returns the token index of the identifier (or the current one after failing).
+fn expect_ident(inout p: P, what: Str) -> Int
+  if p.failed then
+    return p.pos
+  end if
+  if not at_kind(p, TIdent) then
+    var hint = ""
+    if at_kind(p, TKw) then
+      hint = "'" ++ ttext(p) ++ "' is a reserved word"
+    end if
+    fail(inout p, "expected " ++ what ++ ", found " ++ found(p), hint)
+    return p.pos
+  end if
+  return next_tok(inout p)
+end fn expect_ident
+
+fn skip_nl(inout p: P)
+  while at_kind(p, TNl) do
+    let _ = next_tok(inout p)
+  end while
+end fn skip_nl
+
+fn end_line(inout p: P)
+  if p.failed or at_kind(p, TEof) then
+    return
+  end if
+  if not at_kind(p, TNl) then
+    fail(inout p, "expected end of line, found " ++ found(p), "one statement per line")
+    return
+  end if
+  skip_nl(inout p)
+end fn end_line
+
+# ---------- node construction ----------
+
+fn mk(inout p: P, kind: NodeKind, line: Int, col: Int, start: Int, ks: [Int]) -> Int
+  let k0 = len(p.ast.kids)
+  for k in ks do
+    push(p.ast.kids, k)
+  end for
+  var stop = start
+  if p.pos > 0 then
+    stop = p.toks[p.pos - 1].stop
+  end if
+  push(p.ast.nodes, Node { kind: kind, line: line, col: col, start: start, stop: stop, name: "", ival: 0, fval: 0.0, sval: "", flag: false, k0: k0, nk: len(ks), ty: 0, bind: BNone, ref: -1, what: RNone, copy: false, copy_in: false, exh: false })
+  return len(p.ast.nodes) - 1
+end fn mk
+
+# Node at token `t`, spanning from token `t` to the last consumed token.
+fn mk_at(inout p: P, kind: NodeKind, t: Int, ks: [Int]) -> Int
+  let line = p.toks[t].line
+  let col = p.toks[t].col
+  let start = p.toks[t].start
+  return mk(inout p, kind, line, col, start, ks)
+end fn mk_at
+
+fn set_name(inout p: P, n: Int, name: Str)
+  p.ast.nodes[n].name = name
+end fn set_name
+
+# `end <label> [name]`, reporting mismatches against the opener.
+fn close_block(inout p: P, label: Str, opener: Int, name: Str)
+  if p.failed then
+    return
+  end if
+  let oline = show(p.toks[opener].line)
+  var suffix = ""
+  if name != "" then
+    suffix = " " ++ name
+  end if
+  if not at_kw(p, "end") then
+    fail(inout p, "expected 'end " ++ label ++ suffix ++ "' to close " ++ label ++ " opened at line " ++ oline ++ ", found " ++ found(p), "")
+    return
+  end if
+  let et = next_tok(inout p)
+  let eline = p.toks[et].line
+  let ecol = p.toks[et].col
+  var got = ""
+  if at_kind(p, TKw) or at_kind(p, TIdent) then
+    got = ttext(p)
+  end if
+  if got != label then
+    fail_at(inout p, "end-label-mismatch", eline, ecol, "'end " ++ got ++ "' does not match the open '" ++ label ++ "' from line " ++ oline, "write 'end " ++ label ++ suffix ++ "' here, or check for a missing 'end' inside this " ++ label)
+    return
+  end if
+  let _ = next_tok(inout p)
+  if name != "" then
+    if not (at_kind(p, TIdent) and ttext(p) == name) then
+      var gotname = ""
+      if at_kind(p, TIdent) then
+        gotname = " " ++ ttext(p)
+      end if
+      fail_at(inout p, "end-label-mismatch", eline, ecol, "expected 'end " ++ label ++ " " ++ name ++ "', found 'end " ++ label ++ gotname ++ "'", "the " ++ label ++ " opened at line " ++ oline ++ " is named '" ++ name ++ "'")
+      return
+    end if
+    let _ = next_tok(inout p)
+  end if
+end fn close_block
+
+# ---------- types ----------
+
+fn parse_type(inout p: P) -> Int
+  let t = p.pos
+  if at_op(p, "[") then
+    let _ = next_tok(inout p)
+    let el = parse_type(inout p)
+    let _ = expect_op(inout p, "]", "")
+    return mk_at(inout p, NTArr, t, [el])
+  end if
+  let it = expect_ident(inout p, "a type")
+  let name = p.toks[it].text
+  var kind = NTNamed
+  if str_in(name, ["Int", "Float", "Bool", "Str", "Unit"]) then
+    kind = NTPrim
+  end if
+  let n = mk_at(inout p, kind, t, [])
+  set_name(inout p, n, name)
+  return n
+end fn parse_type
+
+# field list `name: Type` lines (records) — returns fielddecl nodes
+fn parse_field_decl(inout p: P) -> Int
+  let ft = expect_ident(inout p, "a field name")
+  let _ = expect_op(inout p, ":", "")
+  let ty = parse_type(inout p)
+  let n = mk_at(inout p, NFieldDecl, ft, [ty])
+  set_name(inout p, n, p.toks[ft].text)
+  return n
+end fn parse_field_decl
+
+fn parse_type_decl(inout p: P) -> Int
+  let kw = next_tok(inout p)
+  let nt = expect_ident(inout p, "a type name")
+  let name = p.toks[nt].text
+  let _ = expect_op(inout p, "=", "")
+  if p.failed then
+    return 0
+  end if
+  if at_kw(p, "record") then
+    let _ = next_tok(inout p)
+    end_line(inout p)
+    var fields: [Int] = []
+    while not p.failed and not at_kw(p, "end") and not at_kind(p, TEof) do
+      push(fields, parse_field_decl(inout p))
+      end_line(inout p)
+    end while
+    close_block(inout p, "type", kw, name)
+    let n = mk_at(inout p, NRecord, kw, fields)
+    set_name(inout p, n, name)
+    return n
+  end if
+  if at_kw(p, "enum") then
+    let _ = next_tok(inout p)
+    end_line(inout p)
+    var variants: [Int] = []
+    while not p.failed and not at_kw(p, "end") and not at_kind(p, TEof) do
+      let vt = expect_ident(inout p, "a variant name")
+      var vfields: [Int] = []
+      if at_op(p, "(") then
+        let _ = next_tok(inout p)
+        while not p.failed and not at_op(p, ")") do
+          let ft = expect_ident(inout p, "a payload field name")
+          let _ = expect_op(inout p, ":", "':' and a type (payload fields are named, e.g. Circle(radius: Float))")
+          let fty = parse_type(inout p)
+          let fd = mk_at(inout p, NFieldDecl, ft, [fty])
+          set_name(inout p, fd, p.toks[ft].text)
+          push(vfields, fd)
+          if not at_op(p, ")") then
+            let _ = expect_op(inout p, ",", "")
+          end if
+        end while
+        let _ = next_tok(inout p)
+      end if
+      let vn = mk_at(inout p, NVariant, vt, vfields)
+      set_name(inout p, vn, p.toks[vt].text)
+      push(variants, vn)
+      end_line(inout p)
+    end while
+    close_block(inout p, "type", kw, name)
+    let en = mk_at(inout p, NEnum, kw, variants)
+    set_name(inout p, en, name)
+    return en
+  end if
+  fail(inout p, "expected 'record' or 'enum' after 'type " ++ name ++ " ='", "")
+  return 0
+end fn parse_type_decl
+
+# ---------- functions ----------
+
+fn parse_fn(inout p: P) -> Int
+  let kw = next_tok(inout p)
+  let nt = expect_ident(inout p, "a function name")
+  let name = p.toks[nt].text
+  let _ = expect_op(inout p, "(", "")
+  var params: [Int] = []
+  while not p.failed and not at_op(p, ")") do
+    var inout_flag = false
+    if at_kw(p, "inout") then
+      inout_flag = true
+      let _ = next_tok(inout p)
+    end if
+    let pt = expect_ident(inout p, "a parameter name")
+    let pname = p.toks[pt].text
+    let _ = expect_op(inout p, ":", "':' and a type for parameter '" ++ pname ++ "' (all parameters are annotated)")
+    let pty = parse_type(inout p)
+    let pn = mk_at(inout p, NParam, pt, [pty])
+    set_name(inout p, pn, pname)
+    p.ast.nodes[pn].flag = inout_flag
+    push(params, pn)
+    if not at_op(p, ")") then
+      let _ = expect_op(inout p, ",", "")
+    end if
+  end while
+  let _ = next_tok(inout p)
+  var ret = -1
+  if at_op(p, "->") then
+    let _ = next_tok(inout p)
+    ret = parse_type(inout p)
+  end if
+  end_line(inout p)
+  var reqs: [Int] = []
+  var enss: [Int] = []
+  var exs: [Int] = []
+  var effs: [Int] = []
+  while not p.failed do
+    if at_kw(p, "requires") then
+      let _ = next_tok(inout p)
+      push(reqs, parse_expr(inout p))
+      end_line(inout p)
+    else if at_kw(p, "ensures") then
+      let _ = next_tok(inout p)
+      push(enss, parse_expr(inout p))
+      end_line(inout p)
+    else if at_kw(p, "example") then
+      let _ = next_tok(inout p)
+      push(exs, parse_expr(inout p))
+      end_line(inout p)
+    else if at_kw(p, "effects") then
+      let _ = next_tok(inout p)
+      var more = true
+      while more and not p.failed do
+        let et = expect_ident(inout p, "an effect name")
+        let en = mk_at(inout p, NEffect, et, [])
+        set_name(inout p, en, p.toks[et].text)
+        push(effs, en)
+        more = at_op(p, ",")
+        if more then
+          let _ = next_tok(inout p)
+        end if
+      end while
+      end_line(inout p)
+    else
+      break
+    end if
+  end while
+  let ps = mk_at(inout p, NBlock, kw, params)
+  let rq = mk_at(inout p, NBlock, kw, reqs)
+  let es = mk_at(inout p, NBlock, kw, enss)
+  let xs = mk_at(inout p, NBlock, kw, exs)
+  let fx = mk_at(inout p, NBlock, kw, effs)
+  let body = parse_block(inout p)
+  close_block(inout p, "fn", kw, name)
+  let fnode = mk_at(inout p, NFn, kw, [ps, ret, rq, es, xs, fx, body])
+  set_name(inout p, fnode, name)
+  return fnode
+end fn parse_fn
+
+fn at_block_end(p: P) -> Bool
+  return at_kw(p, "end") or at_kw(p, "else") or at_kw(p, "case") or at_kind(p, TEof)
+end fn at_block_end
+
+fn parse_block(inout p: P) -> Int
+  let t = p.pos
+  var stmts: [Int] = []
+  skip_nl(inout p)
+  while not p.failed and not at_block_end(p) do
+    push(stmts, parse_stmt(inout p))
+  end while
+  return mk_at(inout p, NBlock, t, stmts)
+end fn parse_block
+
+# ---------- statements ----------
+
+fn parse_stmt(inout p: P) -> Int
+  let t = p.pos
+  if at_kw(p, "let") or at_kw(p, "var") then
+    let is_var = at_kw(p, "var")
+    let _ = next_tok(inout p)
+    let nt = expect_ident(inout p, "a variable name")
+    var ty = -1
+    if at_op(p, ":") then
+      let _ = next_tok(inout p)
+      ty = parse_type(inout p)
+    end if
+    var what = "'=' (every let must be initialized)"
+    if is_var then
+      what = "'=' (every var must be initialized)"
+    end if
+    let _ = expect_op(inout p, "=", what)
+    let init = parse_expr(inout p)
+    end_line(inout p)
+    let n = mk_at(inout p, NLet, t, [ty, init])
+    set_name(inout p, n, p.toks[nt].text)
+    p.ast.nodes[n].flag = is_var
+    return n
+  end if
+  if at_kw(p, "if") then
+    let _ = next_tok(inout p)
+    var ks: [Int] = []
+    push(ks, parse_expr(inout p))
+    let _ = expect_kw(inout p, "then", "'then' after the if condition")
+    end_line(inout p)
+    push(ks, parse_block(inout p))
+    var has_else = false
+    while not p.failed and at_kw(p, "else") do
+      let _ = next_tok(inout p)
+      if at_kw(p, "if") then
+        let _ = next_tok(inout p)
+        push(ks, parse_expr(inout p))
+        let _ = expect_kw(inout p, "then", "'then' after the else-if condition")
+        end_line(inout p)
+        push(ks, parse_block(inout p))
+      else
+        end_line(inout p)
+        push(ks, parse_block(inout p))
+        has_else = true
+        break
+      end if
+    end while
+    close_block(inout p, "if", t, "")
+    end_line(inout p)
+    let n = mk_at(inout p, NIf, t, ks)
+    p.ast.nodes[n].flag = has_else
+    return n
+  end if
+  if at_kw(p, "while") then
+    let _ = next_tok(inout p)
+    let cond = parse_expr(inout p)
+    let _ = expect_kw(inout p, "do", "'do' after the while condition")
+    end_line(inout p)
+    let body = parse_block(inout p)
+    close_block(inout p, "while", t, "")
+    end_line(inout p)
+    return mk_at(inout p, NWhile, t, [cond, body])
+  end if
+  if at_kw(p, "for") then
+    let _ = next_tok(inout p)
+    let nt = expect_ident(inout p, "a loop variable")
+    let _ = expect_kw(inout p, "in", "")
+    let first = parse_expr(inout p)
+    var is_range = false
+    var inclusive = false
+    var last = -1
+    if at_op(p, "..<") or at_op(p, "..=") then
+      is_range = true
+      inclusive = at_op(p, "..=")
+      let _ = next_tok(inout p)
+      last = parse_expr(inout p)
+    else if at_op(p, ".") then
+      fail(inout p, "ranges are written 'a ..< b' (exclusive) or 'a ..= b' (inclusive)", "")
+    end if
+    let _ = expect_kw(inout p, "do", "'do' after the for header")
+    end_line(inout p)
+    let body = parse_block(inout p)
+    close_block(inout p, "for", t, "")
+    end_line(inout p)
+    var n = 0
+    if is_range then
+      n = mk_at(inout p, NFor, t, [first, last, body])
+    else
+      n = mk_at(inout p, NFor, t, [first, body])
+    end if
+    set_name(inout p, n, p.toks[nt].text)
+    p.ast.nodes[n].flag = inclusive
+    if is_range then
+      p.ast.nodes[n].ival = 1
+    end if
+    return n
+  end if
+  if at_kw(p, "match") then
+    let _ = next_tok(inout p)
+    var ks: [Int] = []
+    push(ks, parse_expr(inout p))
+    end_line(inout p)
+    while not p.failed and at_kw(p, "case") do
+      let ct = next_tok(inout p)
+      let vt = expect_ident(inout p, "a variant name or '_'")
+      let vname = p.toks[vt].text
+      var binds: [Int] = []
+      if vname != "_" and at_op(p, "(") then
+        let _ = next_tok(inout p)
+        while not p.failed and not at_op(p, ")") do
+          let bt = expect_ident(inout p, "a binding name")
+          let bn = mk_at(inout p, NBindName, bt, [])
+          set_name(inout p, bn, p.toks[bt].text)
+          push(binds, bn)
+          if not at_op(p, ")") then
+            let _ = expect_op(inout p, ",", "")
+          end if
+        end while
+        let _ = next_tok(inout p)
+      end if
+      end_line(inout p)
+      let body = parse_block(inout p)
+      var cks = [body]
+      for b in binds do
+        push(cks, b)
+      end for
+      let cn = mk_at(inout p, NCase, ct, cks)
+      set_name(inout p, cn, vname)
+      push(ks, cn)
+    end while
+    close_block(inout p, "match", t, "")
+    end_line(inout p)
+    return mk_at(inout p, NMatch, t, ks)
+  end if
+  if at_kw(p, "return") then
+    let _ = next_tok(inout p)
+    if at_kind(p, TNl) or at_kind(p, TEof) then
+      end_line(inout p)
+      return mk_at(inout p, NReturn, t, [])
+    end if
+    let v = parse_expr(inout p)
+    end_line(inout p)
+    return mk_at(inout p, NReturn, t, [v])
+  end if
+  if at_kw(p, "break") or at_kw(p, "continue") then
+    let word = ttext(p)
+    let _ = next_tok(inout p)
+    end_line(inout p)
+    var kind = NBreak
+    if word == "continue" then
+      kind = NContinue
+    end if
+    let bc = mk_at(inout p, kind, t, [])
+    set_name(inout p, bc, word)
+    return bc
+  end if
+  let e = parse_expr(inout p)
+  if at_op(p, "=") then
+    let _ = next_tok(inout p)
+    let v = parse_expr(inout p)
+    end_line(inout p)
+    return mk_at(inout p, NAssign, t, [e, v])
+  end if
+  end_line(inout p)
+  return mk_at(inout p, NExpr, t, [e])
+end fn parse_stmt
+
+# ---------- expressions ----------
+# levels: 0 or, 1 and, 2 not, 3 compare, 4 + - ++, 5 * / %
+
+fn level_has(p: P, level: Int) -> Bool
+  let k = tkind(p)
+  if k != TOp and k != TKw then
+    return false
+  end if
+  let t = ttext(p)
+  if level == 0 then
+    return t == "or"
+  else if level == 1 then
+    return t == "and"
+  else if level == 3 then
+    return k == TOp and str_in(t, ["==", "!=", "<", "<=", ">", ">="])
+  else if level == 4 then
+    return k == TOp and (t == "+" or t == "-" or t == "++")
+  else if level == 5 then
+    return k == TOp and (t == "*" or t == "/" or t == "%")
+  end if
+  return false
+end fn level_has
+
+fn parse_expr(inout p: P) -> Int
+  return parse_bin(inout p, 0)
+end fn parse_expr
+
+fn parse_sub(inout p: P, level: Int) -> Int
+  if level == 0 then
+    return parse_bin(inout p, 1)
+  else if level == 1 then
+    return parse_not(inout p)
+  else if level == 3 then
+    return parse_bin(inout p, 4)
+  else if level == 4 then
+    return parse_bin(inout p, 5)
+  end if
+  return parse_unary(inout p)
+end fn parse_sub
+
+fn parse_bin(inout p: P, level: Int) -> Int
+  let st = p.pos
+  var l = parse_sub(inout p, level)
+  while not p.failed and level_has(p, level) do
+    let ot = next_tok(inout p)
+    let r = parse_sub(inout p, level)
+    let line = p.toks[ot].line
+    let col = p.toks[ot].col
+    let start = p.toks[st].start
+    l = mk(inout p, NBin, line, col, start, [l, r])
+    set_name(inout p, l, p.toks[ot].text)
+    if level == 3 and level_has(p, 3) then
+      fail(inout p, "comparisons don't chain; write 'a < b and b < c'", "")
+    end if
+  end while
+  return l
+end fn parse_bin
+
+fn parse_not(inout p: P) -> Int
+  if at_kw(p, "not") then
+    let t = next_tok(inout p)
+    let x = parse_not(inout p)
+    let n = mk_at(inout p, NUn, t, [x])
+    set_name(inout p, n, "not")
+    return n
+  end if
+  return parse_bin(inout p, 3)
+end fn parse_not
+
+fn parse_unary(inout p: P) -> Int
+  if at_op(p, "-") then
+    let t = next_tok(inout p)
+    let x = parse_unary(inout p)
+    let n = mk_at(inout p, NUn, t, [x])
+    set_name(inout p, n, "-")
+    return n
+  end if
+  return parse_postfix(inout p)
+end fn parse_unary
+
+fn parse_postfix(inout p: P) -> Int
+  let st = p.pos
+  var e = parse_primary(inout p)
+  while not p.failed do
+    if at_op(p, "[") then
+      let t = next_tok(inout p)
+      let idx = parse_expr(inout p)
+      let _ = expect_op(inout p, "]", "")
+      let line = p.toks[t].line
+      let col = p.toks[t].col
+      e = mk(inout p, NIndex, line, col, p.toks[st].start, [e, idx])
+    else if at_op(p, ".") then
+      let t2 = next_tok(inout p)
+      let ft = expect_ident(inout p, "a field name")
+      let line2 = p.toks[t2].line
+      let col2 = p.toks[t2].col
+      e = mk(inout p, NField, line2, col2, p.toks[st].start, [e])
+      set_name(inout p, e, p.toks[ft].text)
+    else if at_op(p, "(") then
+      fail(inout p, "only named functions can be called", "functions are not values in Candor v0")
+    else
+      return e
+    end if
+  end while
+  return e
+end fn parse_postfix
+
+fn parse_primary(inout p: P) -> Int
+  let t = p.pos
+  let k = tkind(p)
+  if k == TInt then
+    let _ = next_tok(inout p)
+    let n = mk_at(inout p, NInt, t, [])
+    p.ast.nodes[n].ival = p.toks[t].ival
+    return n
+  end if
+  if k == TFloat then
+    let _ = next_tok(inout p)
+    let n2 = mk_at(inout p, NFloat, t, [])
+    p.ast.nodes[n2].fval = p.toks[t].fval
+    return n2
+  end if
+  if k == TStr then
+    let _ = next_tok(inout p)
+    let n3 = mk_at(inout p, NStr, t, [])
+    p.ast.nodes[n3].sval = p.toks[t].text
+    return n3
+  end if
+  if at_kw(p, "true") or at_kw(p, "false") then
+    let _ = next_tok(inout p)
+    let n4 = mk_at(inout p, NBool, t, [])
+    p.ast.nodes[n4].flag = p.toks[t].text == "true"
+    return n4
+  end if
+  if at_op(p, "?") then
+    let _ = next_tok(inout p)
+    let ht = expect_ident(inout p, "a hole name after '?', e.g. ?exchange_rate")
+    let n5 = mk_at(inout p, NHole, t, [])
+    set_name(inout p, n5, p.toks[ht].text)
+    return n5
+  end if
+  if at_op(p, "(") then
+    let _ = next_tok(inout p)
+    let inner = parse_expr(inout p)
+    let _ = expect_op(inout p, ")", "")
+    return inner
+  end if
+  if at_op(p, "[") then
+    let _ = next_tok(inout p)
+    var items: [Int] = []
+    while not p.failed and not at_op(p, "]") do
+      push(items, parse_expr(inout p))
+      if not at_op(p, "]") then
+        let _ = expect_op(inout p, ",", "")
+      end if
+    end while
+    let _ = next_tok(inout p)
+    return mk_at(inout p, NArr, t, items)
+  end if
+  if k == TIdent then
+    let name = ttext(p)
+    let _ = next_tok(inout p)
+    if at_op(p, "(") then
+      let _ = next_tok(inout p)
+      var args: [Int] = []
+      while not p.failed and not at_op(p, ")") do
+        if at_kw(p, "inout") then
+          let it = next_tok(inout p)
+          let inner2 = parse_expr(inout p)
+          let w = mk_at(inout p, NInout, it, [inner2])
+          p.ast.nodes[w].line = p.ast.nodes[inner2].line
+          p.ast.nodes[w].col = p.ast.nodes[inner2].col
+          push(args, w)
+        else
+          push(args, parse_expr(inout p))
+        end if
+        if not at_op(p, ")") then
+          let _ = expect_op(inout p, ",", "")
+        end if
+      end while
+      let _ = next_tok(inout p)
+      let c = mk_at(inout p, NCall, t, args)
+      set_name(inout p, c, name)
+      return c
+    end if
+    if at_op(p, "{") then
+      let _ = next_tok(inout p)
+      var fields: [Int] = []
+      while not p.failed and not at_op(p, "}") do
+        let ft = expect_ident(inout p, "a field name")
+        let _ = expect_op(inout p, ":", "")
+        let v = parse_expr(inout p)
+        let fi = mk_at(inout p, NFieldInit, ft, [v])
+        set_name(inout p, fi, p.toks[ft].text)
+        push(fields, fi)
+        if not at_op(p, "}") then
+          let _ = expect_op(inout p, ",", "")
+        end if
+      end while
+      let _ = next_tok(inout p)
+      let r = mk_at(inout p, NRec, t, fields)
+      set_name(inout p, r, name)
+      return r
+    end if
+    let id = mk_at(inout p, NIdent, t, [])
+    set_name(inout p, id, name)
+    return id
+  end if
+  fail(inout p, "expected an expression, found " ++ found(p), "")
+  return mk_at(inout p, NInt, t, [])
+end fn parse_primary
+
+# Top-level `let NAME: Type = expr` is a constant.
+fn parse_const(inout p: P) -> Int
+  let t = p.pos
+  if at_kw(p, "var") then
+    fail(inout p, "top-level 'var' is not allowed; top-level names are constants", "use 'let NAME: Type = ...'")
+    return 0
+  end if
+  let _ = next_tok(inout p)
+  let nt = expect_ident(inout p, "a constant name")
+  let name = p.toks[nt].text
+  if p.failed then
+    return 0
+  end if
+  if not at_op(p, ":") then
+    fail(inout p, "top-level constant '" ++ name ++ "' needs a type", "write 'let " ++ name ++ ": Type = ...'")
+    return 0
+  end if
+  let _ = next_tok(inout p)
+  let ty = parse_type(inout p)
+  let _ = expect_op(inout p, "=", "'=' (every constant must be initialized)")
+  let init = parse_expr(inout p)
+  let n = mk_at(inout p, NConst, t, [ty, init])
+  set_name(inout p, n, name)
+  return n
+end fn parse_const
+
+fn parse_program(src: Str, toks: [Tok]) -> P
+  var p = P { toks: toks, pos: 0, src: src, ast: Ast { nodes: [], kids: [] }, failed: false, err: no_diag() }
+  skip_nl(inout p)
+  var decls: [Int] = []
+  while not p.failed and not at_kind(p, TEof) do
+    if at_kw(p, "fn") then
+      push(decls, parse_fn(inout p))
+    else if at_kw(p, "type") then
+      push(decls, parse_type_decl(inout p))
+    else if at_kw(p, "let") or at_kw(p, "var") then
+      push(decls, parse_const(inout p))
+    else
+      fail(inout p, "expected 'fn', 'type' or 'let' at top level, found " ++ found(p), "statements must be inside a function")
+    end if
+    end_line(inout p)
+  end while
+  let _ = mk(inout p, NProgram, 1, 1, 0, decls)
+  return p
+end fn parse_program

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candor — a language designed by an LLM, for LLMs</title>
+<meta name="description" content="Candor is a small, self-hosting programming language designed by Claude around the ways language models get code wrong: explicit effects, typed holes, contracts, and visible mutation.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="./">Candor<span>.</span></a>
+  <nav class="site">
+    <a href="./" aria-current="page">Overview</a>
+    <a href="guide.html">Language guide</a>
+    <a href="selfhosting.html">Self-hosting</a>
+    <a href="roadmap.html">Roadmap</a>
+    <a class="gh" href="https://github.com/krishnapaul242/candor">GitHub</a>
+  </nav>
+</div></header>
+
+<main>
+  <div class="prose">
+    <p class="muted">An experiment by Krishna Paul, with the language designed and built by Claude</p>
+    <h1>A programming language designed by a language model, for language models.</h1>
+    <p class="lede">Most languages are tuned so humans can <em>write</em> code quickly. Candor is tuned so humans can <em>verify</em> code that someone else wrote: every rule targets a specific way that LLMs get code wrong.</p>
+    <div class="cta">
+      <a class="btn primary" href="guide.html">Read the guide</a>
+      <a class="btn" href="https://github.com/krishnapaul242/candor">View source</a>
+      <a class="btn" href="roadmap.html">Roadmap</a>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat"><b>Self-hosting</b><span>Candor compiles Candor, to a byte-identical fixed point</span></div>
+    <div class="stat"><b>2 backends</b><span>instant JS dev loop, native C build</span></div>
+    <div class="stat"><b>~10 ms</b><span>for the compiler to compile itself</span></div>
+    <div class="stat"><b>0 deps</b><span>Node ≥ 18 plus a C compiler</span></div>
+  </div>
+
+  <h2>A taste</h2>
+<pre><code class="cnd">type Shape = enum
+  Circle(radius: Float)
+  Rect(w: Float, h: Float)
+end type Shape
+
+# No `effects` clause: this function is provably pure.
+fn area(s: Shape) -> Float
+  ensures result >= 0.0
+  example area(Rect(2.0, 3.0)) == 6.0
+  match s
+    case Circle(r)
+      return 3.141592653589793 * r * r
+    case Rect(w, h)
+      return w * h
+  end match
+end fn area
+
+fn convert(amount: Float) -> Float
+  let rate: Float = ?exchange_rate   # a typed hole: honest "I don't know"
+  return amount * rate
+end fn convert
+
+fn main()
+  effects io                         # printing must be declared
+  print(show(area(Circle(1.0))))
+end fn main</code></pre>
+
+  <h2>Designed around failure modes</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>How LLM-written code goes wrong</th><th>What Candor does about it</th></tr></thead>
+    <tbody>
+      <tr><td>Hidden side effects far from the call site</td><td><code>effects io, fs, time</code> in the signature, checked through every call. No clause means the function is pure.</td></tr>
+      <tr><td>Making up a plausible API when unsure</td><td>Typed holes (<code>?exchange_rate</code>) type-check, list what's in scope, trap if reached, and block <code>build</code>.</td></tr>
+      <tr><td>Code that looks right but isn't</td><td><code>requires</code> / <code>ensures</code> contracts checked at runtime, plus <code>example</code> clauses run by <code>candor test</code>.</td></tr>
+      <tr><td>Losing track of nesting</td><td>Labeled ends: <code>end fn area</code>, <code>end if</code>. A mismatch points at the line that opened the block.</td></tr>
+      <tr><td>Silent coercion, truthiness, overflow</td><td>No implicit conversions. Overflow, out-of-bounds indexes and division by zero trap with the function name and line.</td></tr>
+      <tr><td>Aliasing and mutation at a distance</td><td>Value semantics. A callee can change your variable only through <code>inout</code>, and the call site has to say <code>inout</code> too.</td></tr>
+      <tr><td>Off-by-one loops</td><td>Explicit ranges: <code>0 ..&lt; n</code> (exclusive) vs <code>1 ..= n</code> (inclusive).</td></tr>
+      <tr><td>Name confusion</td><td>No shadowing, globally unique enum variants, "did you mean" suggestions, <code>--json</code> diagnostics.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Quick start</h2>
+<pre><code>git clone https://github.com/krishnapaul242/candor && cd candor
+node src/cli.js run   examples/tour.cnd          # instant: compiles in memory to JS
+node src/cli.js run   examples/tour.cnd --native # clang -O2, then run
+node src/cli.js test  examples/tour.cnd          # run every `example` clause
+node src/cli.js check examples/tour.cnd --json   # machine-readable diagnostics
+node src/cli.js build examples/tour.cnd -o tour  # native binary
+selfhost/test.sh                                 # bootstrap the self-hosted compiler</code></pre>
+
+  <h2>What's in the box</h2>
+  <div class="grid">
+    <div class="card"><h3>Reference compiler</h3><p>About 2,000 lines of dependency-free JavaScript: lexer, parser, checker, and two backends held to byte-identical behavior.</p></div>
+    <div class="card"><h3>Self-hosted compiler</h3><p><code>candorc</code>, about 4,000 lines of Candor, with every diagnostic word for word. It bootstraps to a fixed point.</p></div>
+    <div class="card"><h3>Differential tests</h3><p>Every program runs through every compiler path, and stdout, stderr and exit codes must match exactly.</p></div>
+    <div class="card"><h3>Field notes</h3><p>An honest record of what hurt while writing a compiler in the language, which drives the <a href="roadmap.html">roadmap</a>.</p></div>
+  </div>
+
+  <div class="callout prose">
+    <p><strong>Status: experimental (v0.2).</strong> Native builds never free memory, and there are no generics or modules yet. See the <a href="roadmap.html">roadmap</a> for what comes next and why.</p>
+  </div>
+</main>
+
+<footer class="site"><div class="inner">
+  Candor · <a href="https://github.com/krishnapaul242/candor">github.com/krishnapaul242/candor</a> · designed and built by Claude (Anthropic) with Krishna Paul
+</div></footer>
+<script src="candor.js"></script>
+</body>
+</html>

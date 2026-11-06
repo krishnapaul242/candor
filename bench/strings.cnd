@@ -1,0 +1,18 @@
+# String building: ++ concatenation and show() for Int and Float
+# (Float uses the shortest-round-trip printer shared by both backends).
+
+fn main()
+  effects io
+  var total = 0
+  var digits = 0
+  var x = 12345
+  for i in 0 ..< 1000000 do
+    x = (x * 48271) % 2147483647
+    let f = to_float(x) / 2147483647.0
+    let s = "item-" ++ show(i) ++ ": " ++ show(f) ++ " " ++ show(x % 2 == 0)
+    total = total + len(s)
+    digits = digits + len(show(x))
+  end for
+  print("bytes: " ++ show(total))
+  print("digits: " ++ show(digits))
+end fn main

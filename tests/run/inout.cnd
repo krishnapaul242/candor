@@ -1,0 +1,81 @@
+type Parser = record
+  toks: [Str]
+  pos: Int
+end type Parser
+
+type Stack = record
+  items: [[Int]]
+  depth: Int
+end type Stack
+
+fn advance(inout p: Parser) -> Str
+  let t = p.toks[p.pos]
+  p.pos = p.pos + 1
+  return t
+end fn advance
+
+fn bump(inout n: Int, by: Int)
+  n = n + by
+end fn bump
+
+fn push_frame(inout s: Stack, frame: [Int])
+  push(s.items, frame)
+  s.depth = s.depth + 1
+end fn push_frame
+
+fn total(xs: [Int]) -> Int
+  var t = 0
+  for x in xs do
+    t = t + x
+  end for
+  return t
+end fn total
+
+fn first(xss: [[Int]]) -> [Int]
+  for xs in xss do
+    return xs
+  end for
+  return []
+end fn first
+
+fn reset(inout xs: [Int])
+  xs = [0]
+end fn reset
+
+fn main()
+  effects io
+  var p = Parser { toks: ["a", "b", "c"], pos: 0 }
+  let a = advance(inout p)
+  let b = advance(inout p)
+  print(a ++ b ++ " pos=" ++ show(p.pos))
+
+  var n = 10
+  bump(inout n, 5)
+  var counts = [1, 2, 3]
+  bump(inout counts[1], 40)
+  print(show(n) ++ " " ++ show(counts[1]))
+
+  var s = Stack { items: [], depth: 0 }
+  var frame = [1, 2]
+  push_frame(inout s, frame)
+  push(frame, 3)
+  push(s.items[0], 99)
+  print(show(len(frame)) ++ " " ++ show(len(s.items[0])) ++ " depth=" ++ show(s.depth))
+
+  # borrowing: passing a var to a normal param costs nothing and can't alias
+  var big = array(100000, 1)
+  var sum = 0
+  for i in 0 ..< 200 do
+    sum = sum + total(big)
+  end for
+  print(show(sum))
+
+  # a borrowed value that escapes via return is copied
+  var grid = [[1], [2]]
+  let f = first(grid)
+  push(grid[0], 5)
+  print(show(len(f)) ++ " " ++ show(len(grid[0])))
+
+  reset(inout grid[1])
+  print(show(grid[1][0]) ++ " " ++ show(len(grid[1])))
+end fn main

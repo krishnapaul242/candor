@@ -1,0 +1,266 @@
+# ===================== lexer =====================
+
+type Tok = record
+  kind: TokKind
+  text: Str      # name / keyword / operator / decoded string / number text
+  ival: Int
+  fval: Float
+  line: Int
+  col: Int
+  start: Int
+  stop: Int
+end type Tok
+
+type Lexer = record
+  src: Str
+  i: Int
+  line: Int
+  col: Int
+  depth: Int
+  toks: [Tok]
+  kws: StrMap
+  failed: Bool
+  err: Diag
+end type Lexer
+
+fn keyword_list() -> [Str]
+  return ["fn", "end", "let", "var", "if", "then", "else", "while", "do", "for", "in", "return", "break", "continue", "match", "case", "type", "record", "enum", "requires", "ensures", "example", "effects", "and", "or", "not", "true", "false", "inout"]
+end fn keyword_list
+
+# Tokens after which a newline does not end the statement.
+fn continues(t: Str) -> Bool
+  return str_in(t, ["+", "-", "*", "/", "%", "++", "==", "!=", "<", "<=", ">", ">=", "=", ",", "(", "[", "{", ".", "..<", "..=", "->", "and", "or", "not"])
+end fn continues
+
+fn lex_fail(inout lx: Lexer, msg: Str, hint: Str)
+  if not lx.failed then
+    lx.failed = true
+    lx.err = Diag { code: "syntax", msg: msg, hint: hint, line: lx.line, col: lx.col }
+  end if
+end fn lex_fail
+
+fn adv(inout lx: Lexer, n: Int)
+  lx.i = lx.i + n
+  lx.col = lx.col + n
+end fn adv
+
+fn push_tok(inout lx: Lexer, kind: TokKind, text: Str, ival: Int, fval: Float, line: Int, col: Int, start: Int)
+  push(lx.toks, Tok { kind: kind, text: text, ival: ival, fval: fval, line: line, col: col, start: start, stop: lx.i })
+end fn push_tok
+
+fn src_at(lx: Lexer, j: Int) -> Int
+  if j < len(lx.src) then
+    return byte_at(lx.src, j)
+  end if
+  return -1
+end fn src_at
+
+fn lex_number(inout lx: Lexer)
+  let sl = lx.line
+  let sc = lx.col
+  let start = lx.i
+  var j = lx.i
+  while is_digit(src_at(lx, j)) or src_at(lx, j) == 95 do
+    j = j + 1
+  end while
+  var is_float = false
+  if src_at(lx, j) == 46 and is_digit(src_at(lx, j + 1)) then
+    is_float = true
+    j = j + 1
+    while is_digit(src_at(lx, j)) or src_at(lx, j) == 95 do
+      j = j + 1
+    end while
+  end if
+  let e = src_at(lx, j)
+  let e2 = src_at(lx, j + 1)
+  if (e == 101 or e == 69) and (is_digit(e2) or e2 == 43 or e2 == 45) then
+    is_float = true
+    j = j + 1
+    if src_at(lx, j) == 43 or src_at(lx, j) == 45 then
+      j = j + 1
+    end if
+    while is_digit(src_at(lx, j)) do
+      j = j + 1
+    end while
+  end if
+  var parts: [Str] = []
+  for k in start ..< j do
+    if byte_at(lx.src, k) != 95 then
+      push(parts, from_byte(byte_at(lx.src, k)))
+    end if
+  end for
+  let text = join(parts, "")
+  adv(inout lx, j - start)
+  if is_float then
+    push_tok(inout lx, TFloat, text, 0, parse_float(text), sl, sc, start)
+    return
+  end if
+  var v = 0
+  for k in 0 ..< len(text) do
+    let d = byte_at(text, k) - 48
+    if v > 900719925474099 or (v == 900719925474099 and d > 1) then
+      lex_fail(inout lx, "integer literal " ++ text ++ " is outside Int range (±9007199254740991)", "")
+      return
+    end if
+    v = v * 10 + d
+  end for
+  push_tok(inout lx, TInt, text, v, 0.0, sl, sc, start)
+end fn lex_number
+
+fn lex_word(inout lx: Lexer)
+  let sl = lx.line
+  let sc = lx.col
+  let start = lx.i
+  var j = lx.i
+  while is_alnum(src_at(lx, j)) do
+    j = j + 1
+  end while
+  let w = slice(lx.src, start, j)
+  adv(inout lx, j - start)
+  if map_has(lx.kws, w) then
+    push_tok(inout lx, TKw, w, 0, 0.0, sl, sc, start)
+  else
+    push_tok(inout lx, TIdent, w, 0, 0.0, sl, sc, start)
+  end if
+end fn lex_word
+
+fn lex_string(inout lx: Lexer)
+  let sl = lx.line
+  let sc = lx.col
+  let start = lx.i
+  adv(inout lx, 1)
+  var parts: [Str] = []
+  while true do
+    let d = src_at(lx, lx.i)
+    if d == -1 or d == 10 then
+      lex_fail(inout lx, "unterminated string literal", "strings must close on the same line")
+      return
+    end if
+    if d == 34 then
+      adv(inout lx, 1)
+      break
+    end if
+    if d == 92 then
+      let e = src_at(lx, lx.i + 1)
+      if e == 110 then
+        push(parts, "\n")
+      else if e == 116 then
+        push(parts, "\t")
+      else if e == 92 then
+        push(parts, "\\")
+      else if e == 34 then
+        push(parts, "\"")
+      else if e == 48 then
+        push(parts, "\0")
+      else
+        var shown = ""
+        if e >= 0 then
+          shown = from_byte(e)
+        end if
+        lex_fail(inout lx, "unknown escape \\" ++ shown, "valid escapes: \\n \\t \\\\ \\\" \\0")
+        return
+      end if
+      adv(inout lx, 2)
+    else
+      push(parts, from_byte(d))
+      adv(inout lx, 1)
+    end if
+  end while
+  push_tok(inout lx, TStr, join(parts, ""), 0, 0.0, sl, sc, start)
+end fn lex_string
+
+fn lex_op(inout lx: Lexer)
+  let sl = lx.line
+  let sc = lx.col
+  let start = lx.i
+  let n = len(lx.src)
+  var op = ""
+  if start + 3 <= n then
+    let three = slice(lx.src, start, start + 3)
+    if three == "..<" or three == "..=" then
+      op = three
+    end if
+  end if
+  if op == "" and start + 2 <= n then
+    let two = slice(lx.src, start, start + 2)
+    if str_in(two, ["->", "++", "==", "!=", "<=", ">="]) then
+      op = two
+    end if
+  end if
+  let c = byte_at(lx.src, start)
+  if op == "" then
+    let one = from_byte(c)
+    if str_in(one, ["(", ")", "[", "]", "{", "}", ",", ":", ".", "+", "-", "*", "/", "%", "<", ">", "=", "?"]) then
+      op = one
+    end if
+  end if
+  if op == "" then
+    var hint = ""
+    if c == 33 then
+      hint = "use `not` for negation and `!=` for inequality"
+    else if c == 38 or c == 124 then
+      hint = "use `and` / `or`"
+    else if c == 59 then
+      hint = "statements end at a newline; no semicolons"
+    end if
+    lex_fail(inout lx, "unexpected character '" ++ from_byte(c) ++ "'", hint)
+    return
+  end if
+  adv(inout lx, len(op))
+  if op == "(" or op == "[" or op == "{" then
+    lx.depth = lx.depth + 1
+  end if
+  if op == ")" or op == "]" or op == "}" then
+    lx.depth = max_int(0, lx.depth - 1)
+  end if
+  push_tok(inout lx, TOp, op, 0, 0.0, sl, sc, start)
+end fn lex_op
+
+fn lex(src: Str) -> Lexer
+  var kws = map_new()
+  for k in keyword_list() do
+    map_set(inout kws, k, 1)
+  end for
+  var lx = Lexer { src: src, i: 0, line: 1, col: 1, depth: 0, toks: [], kws: kws, failed: false, err: no_diag() }
+  let n = len(src)
+  while lx.i < n and not lx.failed do
+    let c = byte_at(src, lx.i)
+    if c == 35 then
+      while lx.i < n and byte_at(src, lx.i) != 10 do
+        lx.i = lx.i + 1
+      end while
+    else if c == 10 then
+      let nt = len(lx.toks)
+      if lx.depth == 0 and nt > 0 then
+        let pk = lx.toks[nt - 1].kind
+        let pt = lx.toks[nt - 1].text
+        let cont = (pk == TOp or pk == TKw) and continues(pt)
+        if pk != TNl and not cont then
+          push_tok(inout lx, TNl, "\n", 0, 0.0, lx.line, lx.col, lx.i)
+        end if
+      end if
+      lx.i = lx.i + 1
+      lx.line = lx.line + 1
+      lx.col = 1
+    else if c == 32 or c == 9 or c == 13 then
+      adv(inout lx, 1)
+    else if is_digit(c) then
+      lex_number(inout lx)
+    else if is_alpha(c) then
+      lex_word(inout lx)
+    else if c == 34 then
+      lex_string(inout lx)
+    else
+      lex_op(inout lx)
+    end if
+  end while
+  if lx.failed then
+    return lx
+  end if
+  let nt2 = len(lx.toks)
+  if nt2 > 0 and lx.toks[nt2 - 1].kind != TNl then
+    push_tok(inout lx, TNl, "\n", 0, 0.0, lx.line, lx.col, lx.i)
+  end if
+  push_tok(inout lx, TEof, "", 0, 0.0, lx.line, lx.col, lx.i)
+  return lx
+end fn lex

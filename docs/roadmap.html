@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candor Roadmap</title>
+<meta name="description" content="Where Candor is going: modules, distinct types, generics, memory management, tooling, and an evaluation of how well language models write Candor.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="./">Candor<span>.</span></a>
+  <nav class="site">
+    <a href="./">Overview</a>
+    <a href="guide.html">Language guide</a>
+    <a href="selfhosting.html">Self-hosting</a>
+    <a href="roadmap.html" aria-current="page">Roadmap</a>
+    <a class="gh" href="https://github.com/krishnapaul242/candor">GitHub</a>
+  </nav>
+</div></header>
+
+<main><div class="prose">
+  <h1>Roadmap</h1>
+  <p class="lede">The order comes from evidence: what hurt while writing Candor's own compiler in Candor. Each milestone has a concrete way to tell it's done.</p>
+
+  <div class="callout">
+    <p><strong>Ground rules for every change:</strong></p>
+    <p>1. It lands in both compilers, the JS reference and the self-hosted <code>candorc</code>.</p>
+    <p>2. Both backends and both compilers stay byte-identical on every test, and the bootstrap still reaches its fixed point.</p>
+    <p>3. Each new rule comes with a diagnostic that says what to change, not just what's wrong.</p>
+  </div>
+
+  <h2>Done</h2>
+
+  <div class="milestone">
+    <h3>v0.1: Core language <span class="badge done">done</span></h3>
+    <p>Effects in signatures, typed holes, <code>requires</code>/<code>ensures</code>/<code>example</code>, labeled ends, no implicit conversions, trapping arithmetic, value semantics, exhaustive <code>match</code>. Two backends (instant JS and native C) held to byte-identical output by differential tests.</p>
+  </div>
+
+  <div class="milestone">
+    <h3>v0.2: Self-hosting <span class="badge done">done</span></h3>
+    <p><code>inout</code> parameters marked at the call site, borrowed arguments with copy-on-escape, string, file and argument built-ins, and <code>candorc</code> (the compiler in Candor) reaching a bootstrap fixed point. Then the first fixes from the field notes: <code>==</code>/<code>show</code> on payload-free enums, top-level constants, and <code>pop</code>.</p>
+  </div>
+
+  <h2>Next</h2>
+
+  <div class="milestone">
+    <h3>v0.3: Modules <span class="badge next">next</span></h3>
+    <p><code>use "lexer.cnd"</code>, with each file checked as its own unit and diagnostics that name the real file and line. Names stay globally unique (no shadowing across modules), keeping "every name means one thing".</p>
+    <p class="muted"><strong>Done when:</strong> <code>candorc</code> is split into real modules, <code>selfhost/build.sh</code> is deleted, and its errors cite <code>parser.cnd:120</code> instead of a line in a concatenated file.</p>
+  </div>
+
+  <div class="milestone">
+    <h3>v0.4: Distinct types</h3>
+    <p><code>type TyId = distinct Int</code>: same representation, but not interchangeable with <code>Int</code> or with another distinct type. In <code>candorc</code> today, type ids and AST node ids are both <code>Int</code>, and mixing them up type-checks.</p>
+    <p class="muted"><strong>Done when:</strong> <code>candorc</code> uses <code>TyId</code>, <code>NodeId</code> and <code>TokIdx</code>, and swapping any two is a compile error.</p>
+  </div>
+
+  <div class="milestone">
+    <h3>v0.5: Generics and error propagation</h3>
+    <p>Generic records, enums and functions, compiled by monomorphization in C. In the standard library: <code>Option[T]</code> and <code>Result[T, E]</code>, with a visible way to propagate errors (for example <code>try parse_expr(inout p)</code>) inside functions that return <code>Result</code>.</p>
+    <p class="muted"><strong>Done when:</strong> the <code>failed</code> flag disappears from <code>candorc</code>'s parser, <code>read_file</code> returns a <code>Result</code> instead of trapping, and generic code produces readable errors.</p>
+  </div>
+
+  <div class="milestone">
+    <h3>v0.6: Memory</h3>
+    <p>Reference counting with copy-on-write in the native backend. Memory gets freed, and the remaining eager copies (when a value escapes, or on <code>let b = a</code>) become lazy.</p>
+    <p class="muted"><strong>Done when:</strong> the binary-trees benchmark peaks under 50&nbsp;MB (453&nbsp;MB today), long-running loops use bounded memory, and no benchmark gets slower by more than 10%.</p>
+  </div>
+
+  <div class="milestone">
+    <h3>v0.7: A typed AST for <code>candorc</code></h3>
+    <p>With generics and data-carrying enums, the compiler's arena of generic nodes becomes separate types for statements, expressions and types. The big dispatch functions become exhaustive <code>match</code>es, so adding a node kind fails to compile until every pass handles it.</p>
+  </div>
+
+  <h2>Parallel tracks</h2>
+
+  <div class="milestone">
+    <h3>Research: can models actually write Candor well?</h3>
+    <p>This is the question behind the whole project. Give a fresh model only the <a href="guide.html">language guide</a>, then have it solve a fixed task set in Candor and in TypeScript or Python. Measure:</p>
+    <ul>
+      <li>whether the code is correct on the first try;</li>
+      <li>how many attempts it takes to reach correct code;</li>
+      <li>which bugs Candor's rules catch: effects, holes, contracts, traps;</li>
+      <li>which Candor rules the model trips over.</li>
+    </ul>
+    <p>Publish the results here, including the unflattering ones.</p>
+  </div>
+
+  <div class="milestone">
+    <h3>Tooling</h3>
+    <ul>
+      <li><code>candor fmt</code>, a single canonical layout;</li>
+      <li><code>candor test</code> on the native backend;</li>
+      <li><code>--json</code> for <code>run</code> and <code>test</code> output;</li>
+      <li>an index of error codes, with a page per code;</li>
+      <li>editor syntax highlighting and a minimal language server (diagnostics and holes).</li>
+    </ul>
+  </div>
+
+  <div class="milestone">
+    <h3>Performance</h3>
+    <ul>
+      <li>A Ryu-style shortest float printer. Native <code>show(Float)</code> is about 2&nbsp;µs per call today, which makes the strings benchmark slower native than on JS.</li>
+      <li>Cheaper overflow checks on the JS backend's integer-heavy loops. Collatz is 13× slower there than native.</li>
+    </ul>
+  </div>
+
+  <div class="milestone">
+    <h3>Standard library</h3>
+    <p>Generic maps and sets (replacing <code>candorc</code>'s hand-written <code>StrMap</code>), a string builder, sorting, and file and process I/O that return <code>Result</code>. The library stays small: one obvious way to do each thing.</p>
+  </div>
+
+  <div class="milestone">
+    <h3>Long term: Candor all the way down</h3>
+    <p>Give <code>candorc</code> a JavaScript backend so the whole toolchain is written in Candor, and retire the JS front end. Because <code>candorc</code> could then compile itself to JavaScript, the self-hosted compiler could run in the browser, as an <strong>online playground on this site</strong>.</p>
+  </div>
+
+  <h2>Not planned</h2>
+  <ul>
+    <li><strong>Operator overloading, implicit conversions, truthiness, macros.</strong> Each adds a second way for code to mean something, and that's where models get confused.</li>
+    <li><strong>Exceptions.</strong> Errors will be values (<code>Result</code>) that the signature makes visible.</li>
+    <li><strong>Terseness for its own sake.</strong> Verbosity is cheap for the writer, and explicitness is what the reviewer needs.</li>
+  </ul>
+</div></main>
+
+<footer class="site"><div class="inner">
+  Candor · <a href="https://github.com/krishnapaul242/candor">github.com/krishnapaul242/candor</a> · designed and built by Claude (Anthropic) with Krishna Paul
+</div></footer>
+</body>
+</html>

@@ -1,0 +1,6 @@
+fn main()
+  effects io
+  print("leaving")
+  exit(3)
+  print("unreachable")
+end fn main

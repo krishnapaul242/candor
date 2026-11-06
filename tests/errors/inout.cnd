@@ -1,0 +1,18 @@
+fn bump(inout n: Int, by: Int)
+  n = n + by
+end fn bump
+
+fn swap(inout a: Int, inout b: Int)
+  let t = a
+  a = b
+  b = t
+end fn swap
+
+fn main()
+  let k = 1
+  var x = 1
+  bump(x, 1)
+  bump(inout k, 1)
+  swap(inout x, inout x)
+  bump(inout x, x)
+end fn main

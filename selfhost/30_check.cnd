@@ -1,0 +1,1546 @@
+# ===================== checker =====================
+# Types are interned ids into Cx.tys; the prelude types have fixed ids (T_INT etc).
+
+type Ty = record
+  k: TyKind
+  name: Str
+  el: Int
+end type Ty
+
+type Hole = record
+  name: Str
+  ty: Str
+  fn_name: Str
+  line: Int
+  col: Int
+  scope: Str
+end type Hole
+
+type Cx = record
+  ast: Ast
+  src: Str
+  tys: [Ty]
+  diags: [Diag]
+  holes: [Hole]
+  types: StrMap
+  variants: StrMap
+  fns: StrMap
+  fn_list: [Int]
+  cur_fn: Int
+  effs: [Str]
+  where: Str
+  loops: Int
+  sc_n: Int
+  sc_names: [Str]
+  sc_tys: [Int]
+  sc_kinds: [Bind]
+  sc_lines: [Int]
+  sc_marks: [Int]
+  const_nodes: [Int]
+  const_names: [Str]
+  const_tys: [Int]
+  const_lines: [Int]
+end type Cx
+
+fn new_cx(ast: Ast, src: Str) -> Cx
+  let tys = [Ty { k: YErr, name: "", el: -1 }, Ty { k: YInt, name: "", el: -1 }, Ty { k: YFloat, name: "", el: -1 }, Ty { k: YBool, name: "", el: -1 }, Ty { k: YStr, name: "", el: -1 }, Ty { k: YUnit, name: "", el: -1 }, Ty { k: YArr, name: "", el: 4 }]
+  return Cx { ast: ast, src: src, tys: tys, diags: [], holes: [], types: map_new(), variants: map_new(), fns: map_new(), fn_list: [], cur_fn: -1, effs: [], where: "body", loops: 0, sc_n: 0, sc_names: [], sc_tys: [], sc_kinds: [], sc_lines: [], sc_marks: [], const_nodes: [], const_names: [], const_tys: [], const_lines: [] }
+end fn new_cx
+
+# ---------- types ----------
+# Fixed ids for the prelude types.
+
+let T_ERR: Int = 0
+let T_INT: Int = 1
+let T_FLOAT: Int = 2
+let T_BOOL: Int = 3
+let T_STR: Int = 4
+let T_UNIT: Int = 5
+let T_STRS: Int = 6
+
+
+
+fn intern(inout cx: Cx, k: TyKind, name: Str, el: Int) -> Int
+  for i in 0 ..< len(cx.tys) do
+    if cx.tys[i].k == k and cx.tys[i].name == name and cx.tys[i].el == el then
+      return i
+    end if
+  end for
+  push(cx.tys, Ty { k: k, name: name, el: el })
+  return len(cx.tys) - 1
+end fn intern
+
+fn ty_str(cx: Cx, t: Int) -> Str
+  match cx.tys[t].k
+    case YArr
+      return "[" ++ ty_str(cx, cx.tys[t].el) ++ "]"
+    case YRec
+      return cx.tys[t].name
+    case YEnum
+      return cx.tys[t].name
+    case YErr
+      return "Err"
+    case YInt
+      return "Int"
+    case YFloat
+      return "Float"
+    case YBool
+      return "Bool"
+    case YStr
+      return "Str"
+    case YUnit
+      return "Unit"
+  end match
+end fn ty_str
+
+fn ty_eq(a: Int, b: Int) -> Bool
+  return a == 0 or b == 0 or a == b
+end fn ty_eq
+
+fn tk(cx: Cx, t: Int) -> TyKind
+  return cx.tys[t].k
+end fn tk
+
+# A payload-free enum is a plain tag, so == and show are meaningful for it.
+fn simple_enum(cx: Cx, t: Int) -> Bool
+  if cx.tys[t].k != YEnum then
+    return false
+  end if
+  let d = map_get(cx.types, cx.tys[t].name)
+  for i in 0 ..< cnk(cx, d) do
+    if cnk(cx, ckid(cx, d, i)) > 0 then
+      return false
+    end if
+  end for
+  return true
+end fn simple_enum
+
+fn needs_copy_any(cx: Cx, t: Int) -> Bool
+  let k = cx.tys[t].k
+  return k == YArr or k == YRec
+end fn needs_copy_any
+
+# ---------- diagnostics ----------
+
+fn err(inout cx: Cx, code: Str, n: Int, msg: Str, hint: Str)
+  let line = cx.ast.nodes[n].line
+  let col = cx.ast.nodes[n].col
+  push(cx.diags, Diag { code: code, msg: msg, hint: hint, line: line, col: col })
+end fn err
+
+fn did_you_mean(s: Str, fallback: Str) -> Str
+  if s != "" then
+    return "did you mean '" ++ s ++ "'?"
+  end if
+  return fallback
+end fn did_you_mean
+
+fn nname(cx: Cx, n: Int) -> Str
+  return cx.ast.nodes[n].name
+end fn nname
+
+fn nkind(cx: Cx, n: Int) -> NodeKind
+  return cx.ast.nodes[n].kind
+end fn nkind
+
+fn ckid(cx: Cx, n: Int, i: Int) -> Int
+  return cx.ast.kids[cx.ast.nodes[n].k0 + i]
+end fn ckid
+
+fn cnk(cx: Cx, n: Int) -> Int
+  return cx.ast.nodes[n].nk
+end fn cnk
+
+fn src_of(cx: Cx, n: Int) -> Str
+  return slice(cx.src, cx.ast.nodes[n].start, cx.ast.nodes[n].stop)
+end fn src_of
+
+# ---------- scopes ----------
+
+fn sc_push(inout cx: Cx)
+  push(cx.sc_marks, cx.sc_n)
+end fn sc_push
+
+fn sc_pop(inout cx: Cx)
+  # names live in parallel arrays with a logical length; marks remember each scope's start
+  cx.sc_n = pop(cx.sc_marks)
+end fn sc_pop
+
+fn lookup(cx: Cx, name: Str) -> Int
+  var i = cx.sc_n - 1
+  while i >= 0 do
+    if cx.sc_names[i] == name then
+      return i
+    end if
+    i = i - 1
+  end while
+  return -1
+end fn lookup
+
+fn visible_names(cx: Cx) -> [Str]
+  var out: [Str] = []
+  for i in 0 ..< cx.sc_n do
+    if not str_in(cx.sc_names[i], out) then
+      push(out, cx.sc_names[i])
+    end if
+  end for
+  return out
+end fn visible_names
+
+fn declare(inout cx: Cx, name: Str, t: Int, kind: Bind, at: Int)
+  if name == "_" then
+    return
+  end if
+  let prev = lookup(cx, name)
+  if prev >= 0 then
+    err(inout cx, "shadowing", at, "'" ++ name ++ "' is already defined at line " ++ show(cx.sc_lines[prev]), "Candor forbids shadowing so every name means one thing; pick a new name")
+  end if
+  sc_put(inout cx, name, t, kind, cx.ast.nodes[at].line)
+end fn declare
+
+fn sc_put(inout cx: Cx, name: Str, t: Int, kind: Bind, line: Int)
+  let i = cx.sc_n
+  if i < len(cx.sc_names) then
+    cx.sc_names[i] = name
+    cx.sc_tys[i] = t
+    cx.sc_kinds[i] = kind
+    cx.sc_lines[i] = line
+  else
+    push(cx.sc_names, name)
+    push(cx.sc_tys, t)
+    push(cx.sc_kinds, kind)
+    push(cx.sc_lines, line)
+  end if
+  cx.sc_n = i + 1
+end fn sc_put
+
+fn begin_ctx(inout cx: Cx, f: Int, where: Str, with_effects: Bool)
+  cx.cur_fn = f
+  cx.where = where
+  cx.loops = 0
+  cx.sc_n = 0
+  cx.sc_marks = []
+  for ci in 0 ..< len(cx.const_names) do
+    sc_put(inout cx, cx.const_names[ci], cx.const_tys[ci], BConst, cx.const_lines[ci])
+  end for
+  sc_push(inout cx)
+  var effs: [Str] = []
+  if with_effects then
+    let fx = fn_effects(cx.ast, f)
+    for i in 0 ..< cnk(cx, fx) do
+      push(effs, nname(cx, ckid(cx, fx, i)))
+    end for
+  end if
+  cx.effs = effs
+end fn begin_ctx
+
+fn declare_params(inout cx: Cx, f: Int)
+  let ps = fn_params(cx.ast, f)
+  for i in 0 ..< cnk(cx, ps) do
+    let pn = ckid(cx, ps, i)
+    var kind = BParam
+    if cx.ast.nodes[pn].flag then
+      kind = BInout
+    end if
+    let pname = nname(cx, pn)
+    let pty = cx.ast.nodes[pn].ty
+    declare(inout cx, pname, pty, kind, pn)
+  end for
+end fn declare_params
+
+# ---------- builtins ----------
+
+fn builtin_names() -> [Str]
+  return ["print", "show", "len", "push", "pop", "array", "to_float", "to_int", "sqrt", "assert", "clock_ms", "byte_at", "slice", "from_byte", "join", "parse_float", "eprint", "args", "exit", "read_file", "write_file"]
+end fn builtin_names
+
+fn builtin_params(name: Str) -> [Int]
+  if name == "print" or name == "eprint" or name == "from_byte" then
+    if name == "from_byte" then
+      return [T_INT]
+    end if
+    return [T_STR]
+  end if
+  if name == "to_float" or name == "exit" then
+    return [T_INT]
+  end if
+  if name == "to_int" or name == "sqrt" then
+    return [T_FLOAT]
+  end if
+  if name == "assert" then
+    return [T_BOOL]
+  end if
+  if name == "byte_at" then
+    return [T_STR, T_INT]
+  end if
+  if name == "slice" then
+    return [T_STR, T_INT, T_INT]
+  end if
+  if name == "join" then
+    return [T_STRS, T_STR]
+  end if
+  if name == "parse_float" or name == "read_file" then
+    return [T_STR]
+  end if
+  if name == "write_file" then
+    return [T_STR, T_STR]
+  end if
+  return []
+end fn builtin_params
+
+fn builtin_ret(name: Str) -> Int
+  if str_in(name, ["print", "eprint", "exit", "write_file", "push", "assert"]) then
+    return T_UNIT
+  end if
+  if str_in(name, ["to_int", "byte_at", "clock_ms", "len"]) then
+    return T_INT
+  end if
+  if name == "to_float" or name == "sqrt" or name == "parse_float" then
+    return T_FLOAT
+  end if
+  if name == "args" then
+    return T_STRS
+  end if
+  return T_STR
+end fn builtin_ret
+
+fn builtin_effect(name: Str) -> Str
+  if str_in(name, ["print", "eprint", "args", "exit"]) then
+    return "io"
+  end if
+  if name == "read_file" or name == "write_file" then
+    return "fs"
+  end if
+  if name == "clock_ms" then
+    return "time"
+  end if
+  return ""
+end fn builtin_effect
+
+fn is_special_builtin(name: Str) -> Bool
+  return str_in(name, ["show", "len", "push", "pop", "array"])
+end fn is_special_builtin
+
+# ---------- places and copies ----------
+
+fn is_place(cx: Cx, e: Int) -> Bool
+  let k = nkind(cx, e)
+  if k == NIdent then
+    return true
+  end if
+  if k == NIndex or k == NField then
+    return is_place(cx, ckid(cx, e, 0))
+  end if
+  return false
+end fn is_place
+
+fn place_root(cx: Cx, e: Int) -> Int
+  if nkind(cx, e) == NIdent then
+    return e
+  end if
+  return place_root(cx, ckid(cx, e, 0))
+end fn place_root
+
+fn mutable_kind(b: Bind) -> Bool
+  return b == BVar or b == BInout
+end fn mutable_kind
+
+fn fresh(cx: Cx, e: Int) -> Bool
+  let k = nkind(cx, e)
+  return cx.ast.nodes[e].copy or not needs_copy_any(cx, cx.ast.nodes[e].ty) or k == NArr or k == NRec or k == NCall
+end fn fresh
+
+fn escape(inout cx: Cx, e: Int)
+  if not fresh(cx, e) then
+    cx.ast.nodes[e].copy_in = true
+  end if
+end fn escape
+
+fn unwrap(cx: Cx, e: Int) -> Int
+  if nkind(cx, e) == NInout then
+    return ckid(cx, e, 0)
+  end if
+  return e
+end fn unwrap
+
+# ---------- effects ----------
+
+fn require_effect(inout cx: Cx, eff: Str, n: Int, desc: Str)
+  if eff == "" or str_in(eff, cx.effs) then
+    return
+  end if
+  if cx.where == "constant" then
+    err(inout cx, "effect-in-contract", n, desc ++ " has effect '" ++ eff ++ "', but constant initializers must be pure", "")
+    return
+  end if
+  if cx.where != "body" then
+    err(inout cx, "effect-in-contract", n, desc ++ " has effect '" ++ eff ++ "', but " ++ cx.where ++ " clauses must be pure", "")
+    return
+  end if
+  let fname = nname(cx, cx.cur_fn)
+  var all = cx.effs
+  push(all, eff)
+  err(inout cx, "effect-missing", n, desc ++ " needs effect '" ++ eff ++ "', but fn " ++ fname ++ " does not declare it", "add 'effects " ++ join(all, ", ") ++ "' to the header of fn " ++ fname ++ " (line " ++ show(cx.ast.nodes[cx.cur_fn].line) ++ ")")
+end fn require_effect
+
+# ---------- expressions ----------
+
+fn expect_ty(inout cx: Cx, e: Int, t: Int, what: Str, mode: Mode) -> Int
+  let got = check_expr(inout cx, e, t, mode)
+  if not ty_eq(got, t) then
+    var hint = ""
+    if got == T_INT and t == T_FLOAT then
+      hint = "Candor has no implicit conversions; use to_float(...)"
+    else if got == T_FLOAT and t == T_INT then
+      hint = "use to_int(...) (truncates toward zero)"
+    else if t == T_STR and (got == T_INT or got == T_FLOAT or got == T_BOOL) then
+      hint = "use show(...) to make a Str"
+    end if
+    err(inout cx, "type-mismatch", e, what ++ " has type " ++ ty_str(cx, got) ++ ", expected " ++ ty_str(cx, t), hint)
+  end if
+  return got
+end fn expect_ty
+
+# mode: MValue | MBorrow | MBase
+fn check_expr(inout cx: Cx, e: Int, expected: Int, mode: Mode) -> Int
+  let t = check_inner(inout cx, e, expected)
+  cx.ast.nodes[e].ty = t
+  if mode == MValue and is_place(cx, e) then
+    let r = place_root(cx, e)
+    if mutable_kind(cx.ast.nodes[r].bind) then
+      cx.ast.nodes[e].copy = true
+    end if
+  end if
+  return t
+end fn check_expr
+
+fn record_fields(cx: Cx, decl: Int) -> [Str]
+  var out: [Str] = []
+  for i in 0 ..< cnk(cx, decl) do
+    push(out, nname(cx, ckid(cx, decl, i)))
+  end for
+  return out
+end fn record_fields
+
+fn find_field(cx: Cx, decl: Int, name: Str) -> Int
+  for i in 0 ..< cnk(cx, decl) do
+    if nname(cx, ckid(cx, decl, i)) == name then
+      return ckid(cx, decl, i)
+    end if
+  end for
+  return -1
+end fn find_field
+
+fn check_inner(inout cx: Cx, e: Int, expected: Int) -> Int
+  let k = nkind(cx, e)
+  if k == NInt then
+    return T_INT
+  end if
+  if k == NFloat then
+    return T_FLOAT
+  end if
+  if k == NStr then
+    return T_STR
+  end if
+  if k == NBool then
+    return T_BOOL
+  end if
+  if k == NInout then
+    return check_expr(inout cx, ckid(cx, e, 0), expected, MBorrow)
+  end if
+  if k == NHole then
+    let hname = nname(cx, e)
+    if expected < 0 then
+      err(inout cx, "hole-untyped", e, "can't tell what type hole ?" ++ hname ++ " should have", "give it context, e.g. 'let " ++ hname ++ ": Float = ?" ++ hname ++ "'")
+      return T_ERR
+    end if
+    var scope: [Str] = []
+    for i in 0 ..< cx.sc_n do
+      push(scope, cx.sc_names[i] ++ ": " ++ ty_str(cx, cx.sc_tys[i]))
+    end for
+    let line = cx.ast.nodes[e].line
+    let col = cx.ast.nodes[e].col
+    var fname = "fn " ++ nname(cx, cx.cur_fn)
+    if cx.where == "constant" then
+      fname = "const " ++ nname(cx, cx.cur_fn)
+    end if
+    let tstr = ty_str(cx, expected)
+    push(cx.holes, Hole { name: hname, ty: tstr, fn_name: fname, line: line, col: col, scope: join(scope, ", ") })
+    return expected
+  end if
+  if k == NIdent then
+    return check_ident(inout cx, e)
+  end if
+  if k == NCall then
+    return check_call(inout cx, e, expected)
+  end if
+  if k == NRec then
+    return check_rec(inout cx, e)
+  end if
+  if k == NArr then
+    return check_arr(inout cx, e, expected)
+  end if
+  if k == NIndex then
+    let bt = check_expr(inout cx, ckid(cx, e, 0), -1, MBase)
+    let _ = expect_ty(inout cx, ckid(cx, e, 1), 1, "index", MValue)
+    if bt == T_ERR then
+      return T_ERR
+    end if
+    if tk(cx, bt) != YArr then
+      err(inout cx, "type-mismatch", e, "can only index arrays, not " ++ ty_str(cx, bt), "")
+      return T_ERR
+    end if
+    return cx.tys[bt].el
+  end if
+  if k == NField then
+    return check_field(inout cx, e)
+  end if
+  if k == NUn then
+    if nname(cx, e) == "not" then
+      let _ = expect_ty(inout cx, ckid(cx, e, 0), 3, "operand of 'not'", MValue)
+      return T_BOOL
+    end if
+    let t = check_expr(inout cx, ckid(cx, e, 0), expected, MValue)
+    if t != T_INT and t != T_FLOAT and t != T_ERR then
+      err(inout cx, "type-mismatch", e, "can't negate " ++ ty_str(cx, t), "")
+    end if
+    return t
+  end if
+  if k == NBin then
+    return check_bin(inout cx, e, expected)
+  end if
+  return T_ERR
+end fn check_inner
+
+fn check_ident(inout cx: Cx, e: Int) -> Int
+  let name = nname(cx, e)
+  let b = lookup(cx, name)
+  if b >= 0 then
+    cx.ast.nodes[e].bind = cx.sc_kinds[b]
+    return cx.sc_tys[b]
+  end if
+  let v = map_get(cx.variants, name)
+  if v >= 0 then
+    if cnk(cx, v) > 0 then
+      err(inout cx, "arity", e, "variant " ++ name ++ " carries " ++ show(cnk(cx, v)) ++ " field(s); construct it as " ++ name ++ "(" ++ join(record_fields(cx, v), ", ") ++ ")", "")
+      return T_ERR
+    end if
+    cx.ast.nodes[e].ref = v
+    cx.ast.nodes[e].what = RVariant
+    return cx.ast.nodes[v].ty
+  end if
+  for cn in cx.const_nodes do
+    if nname(cx, cn) == name then
+      err(inout cx, "const-order", e, "constant '" ++ name ++ "' is used before its definition (line " ++ show(cx.ast.nodes[cn].line) ++ ")", "move the definition of " ++ name ++ " above this use")
+      return T_ERR
+    end if
+  end for
+  var cands = visible_names(cx)
+  for vk in cx.variants.keys do
+    push(cands, vk)
+  end for
+  let s = suggest(name, cands)
+  var hint = did_you_mean(s, "")
+  if s == "" and map_has(cx.fns, name) then
+    hint = "'" ++ name ++ "' is a function; call it with ()"
+  end if
+  err(inout cx, "unknown-name", e, "unknown name '" ++ name ++ "'", hint)
+  return T_ERR
+end fn check_ident
+
+fn check_field(inout cx: Cx, e: Int) -> Int
+  let bt = check_expr(inout cx, ckid(cx, e, 0), -1, MBase)
+  if bt == T_ERR then
+    return T_ERR
+  end if
+  if tk(cx, bt) != YRec then
+    var hint = ""
+    if tk(cx, bt) == YEnum then
+      hint = "use match to read enum payloads"
+    end if
+    err(inout cx, "type-mismatch", e, ty_str(cx, bt) ++ " has no fields", hint)
+    return T_ERR
+  end if
+  let decl = map_get(cx.types, cx.tys[bt].name)
+  let fname = nname(cx, e)
+  let fd = find_field(cx, decl, fname)
+  if fd < 0 then
+    let s = suggest(fname, record_fields(cx, decl))
+    err(inout cx, "unknown-field", e, "record " ++ cx.tys[bt].name ++ " has no field '" ++ fname ++ "'", did_you_mean(s, ""))
+    return T_ERR
+  end if
+  return cx.ast.nodes[fd].ty
+end fn check_field
+
+fn check_rec(inout cx: Cx, e: Int) -> Int
+  let name = nname(cx, e)
+  let decl = map_get(cx.types, name)
+  if decl < 0 or nkind(cx, decl) != NRecord then
+    var recs: [Str] = []
+    for tn in cx.types.keys do
+      if nkind(cx, map_get(cx.types, tn)) == NRecord then
+        push(recs, tn)
+      end if
+    end for
+    let s = suggest(name, recs)
+    err(inout cx, "unknown-type", e, "'" ++ name ++ "' is not a record type", did_you_mean(s, ""))
+    for i in 0 ..< cnk(cx, e) do
+      let _ = check_expr(inout cx, ckid(cx, ckid(cx, e, i), 0), -1, MValue)
+    end for
+    return T_ERR
+  end if
+  var given: [Str] = []
+  for i in 0 ..< cnk(cx, e) do
+    let fi = ckid(cx, e, i)
+    let fname = nname(cx, fi)
+    let val = ckid(cx, fi, 0)
+    let fd = find_field(cx, decl, fname)
+    if fd < 0 then
+      let s2 = suggest(fname, record_fields(cx, decl))
+      err(inout cx, "unknown-field", fi, "record " ++ name ++ " has no field '" ++ fname ++ "'", did_you_mean(s2, "fields: " ++ join(record_fields(cx, decl), ", ")))
+      let _ = check_expr(inout cx, val, -1, MValue)
+    else
+      if str_in(fname, given) then
+        err(inout cx, "duplicate", fi, "field '" ++ fname ++ "' given twice", "")
+      end if
+      push(given, fname)
+      let _ = expect_ty(inout cx, val, cx.ast.nodes[fd].ty, "field '" ++ fname ++ "'", MValue)
+      escape(inout cx, val)
+    end if
+  end for
+  var missing: [Str] = []
+  for f in record_fields(cx, decl) do
+    if not str_in(f, given) then
+      push(missing, f)
+    end if
+  end for
+  if len(missing) > 0 then
+    err(inout cx, "missing-field", e, "record literal " ++ name ++ " is missing: " ++ join(missing, ", "), "every field must be given explicitly")
+  end if
+  return intern(inout cx, YRec, name, -1)
+end fn check_rec
+
+fn check_arr(inout cx: Cx, e: Int, expected: Int) -> Int
+  var el = -1
+  if expected >= 0 and tk(cx, expected) == YArr then
+    el = cx.tys[expected].el
+  end if
+  let n = cnk(cx, e)
+  if n == 0 then
+    if el < 0 then
+      err(inout cx, "cannot-infer", e, "can't infer the element type of []", "annotate it, e.g. 'var xs: [Int] = []'")
+      return T_ERR
+    end if
+    return intern(inout cx, YArr, "", el)
+  end if
+  if el < 0 then
+    el = check_expr(inout cx, ckid(cx, e, 0), -1, MValue)
+  else
+    let _ = expect_ty(inout cx, ckid(cx, e, 0), el, "array element", MValue)
+  end if
+  for i in 1 ..< n do
+    let _ = expect_ty(inout cx, ckid(cx, e, i), el, "array element", MValue)
+  end for
+  for j in 0 ..< n do
+    escape(inout cx, ckid(cx, e, j))
+  end for
+  if el == T_UNIT then
+    err(inout cx, "unit-value", e, "arrays of Unit are not allowed", "")
+  end if
+  return intern(inout cx, YArr, "", el)
+end fn check_arr
+
+fn is_arith(op: Str) -> Bool
+  return op == "+" or op == "-" or op == "*" or op == "/" or op == "%"
+end fn is_arith
+
+fn check_bin(inout cx: Cx, e: Int, expected: Int) -> Int
+  let op = nname(cx, e)
+  let l = ckid(cx, e, 0)
+  let r = ckid(cx, e, 1)
+  if op == "and" or op == "or" then
+    let _ = expect_ty(inout cx, l, T_BOOL, "left side of '" ++ op ++ "'", MValue)
+    let _ = expect_ty(inout cx, r, T_BOOL, "right side of '" ++ op ++ "'", MValue)
+    return T_BOOL
+  end if
+  if op == "++" then
+    let _ = expect_ty(inout cx, l, T_STR, "left side of '++'", MValue)
+    let _ = expect_ty(inout cx, r, T_STR, "right side of '++'", MValue)
+    return T_STR
+  end if
+  var hint_ty = -1
+  if expected == T_INT or expected == T_FLOAT then
+    hint_ty = expected
+  end if
+  if op == "==" or op == "!=" then
+    hint_ty = -1
+  end if
+  let lt = check_expr(inout cx, l, hint_ty, MValue)
+  var rexp = lt
+  if lt == T_ERR then
+    rexp = -1
+  end if
+  let rt = check_expr(inout cx, r, rexp, MValue)
+  if lt == T_ERR or rt == T_ERR then
+    if is_arith(op) then
+      if lt == T_ERR then
+        return rt
+      end if
+      return lt
+    end if
+    return T_BOOL
+  end if
+  if not ty_eq(lt, rt) then
+    var hint = ""
+    if (lt == T_INT and rt == T_FLOAT) or (lt == T_FLOAT and rt == T_INT) then
+      hint = "Candor never converts implicitly; wrap the Int side in to_float(...)"
+    else if op == "+" and (lt == T_STR or rt == T_STR) then
+      hint = "use '++' to join strings and show(...) to convert"
+    end if
+    err(inout cx, "type-mismatch", e, "'" ++ op ++ "' needs both sides to have the same type, got " ++ ty_str(cx, lt) ++ " and " ++ ty_str(cx, rt), hint)
+    if is_arith(op) then
+      return lt
+    end if
+    return T_BOOL
+  end if
+  if op == "+" or op == "-" or op == "*" or op == "/" then
+    if lt != T_INT and lt != T_FLOAT then
+      var hint2 = ""
+      if lt == T_STR and op == "+" then
+        hint2 = "use '++' to join strings"
+      end if
+      err(inout cx, "type-mismatch", e, "'" ++ op ++ "' works on Int or Float, not " ++ ty_str(cx, lt), hint2)
+    end if
+    return lt
+  end if
+  if op == "%" then
+    if lt != T_INT then
+      err(inout cx, "type-mismatch", e, "'%' works on Int, not " ++ ty_str(cx, lt), "")
+    end if
+    return lt
+  end if
+  if op == "==" or op == "!=" then
+    if lt != T_INT and lt != T_FLOAT and lt != T_BOOL and lt != T_STR and not simple_enum(cx, lt) then
+      var hint3 = "compare the fields you care about"
+      if tk(cx, lt) == YEnum then
+        hint3 = cx.tys[lt].name ++ " has variants with payloads; use match to inspect them"
+      end if
+      err(inout cx, "type-mismatch", e, "'" ++ op ++ "' compares Int, Float, Bool, Str or payload-free enums, not " ++ ty_str(cx, lt), hint3)
+    end if
+    return T_BOOL
+  end if
+  if lt != T_INT and lt != T_FLOAT then
+    err(inout cx, "type-mismatch", e, "'" ++ op ++ "' orders Int or Float, not " ++ ty_str(cx, lt), "")
+  end if
+  return T_BOOL
+end fn check_bin
+
+fn arity_ok(inout cx: Cx, e: Int, want: Int) -> Bool
+  let n = cnk(cx, e)
+  if n != want then
+    err(inout cx, "arity", e, nname(cx, e) ++ " takes " ++ show(want) ++ " argument(s), got " ++ show(n), "")
+    return false
+  end if
+  return true
+end fn arity_ok
+
+fn check_args_loose(inout cx: Cx, e: Int, mode: Mode)
+  for i in 0 ..< cnk(cx, e) do
+    let _ = check_expr(inout cx, ckid(cx, e, i), -1, mode)
+  end for
+end fn check_args_loose
+
+fn check_call(inout cx: Cx, e: Int, expected: Int) -> Int
+  let name = nname(cx, e)
+  let n = cnk(cx, e)
+  let v = map_get(cx.variants, name)
+  if v >= 0 then
+    cx.ast.nodes[e].ref = v
+    cx.ast.nodes[e].what = RVariant
+    if arity_ok(inout cx, e, cnk(cx, v)) then
+      for i in 0 ..< n do
+        let fd = ckid(cx, v, i)
+        let a = ckid(cx, e, i)
+        let _ = expect_ty(inout cx, a, cx.ast.nodes[fd].ty, name ++ "." ++ nname(cx, fd), MValue)
+        escape(inout cx, a)
+      end for
+    else
+      check_args_loose(inout cx, e, MValue)
+    end if
+    return cx.ast.nodes[v].ty
+  end if
+  if str_in(name, builtin_names()) then
+    cx.ast.nodes[e].what = RBuiltin
+    require_effect(inout cx, builtin_effect(name), e, name ++ "(...)")
+    if not is_special_builtin(name) then
+      let ps = builtin_params(name)
+      if arity_ok(inout cx, e, len(ps)) then
+        for i in 0 ..< n do
+          let _ = expect_ty(inout cx, ckid(cx, e, i), ps[i], "argument " ++ show(i + 1) ++ " of " ++ name, MBorrow)
+        end for
+      end if
+      return builtin_ret(name)
+    end if
+    return check_special(inout cx, e, expected)
+  end if
+  let f = map_get(cx.fns, name)
+  if f < 0 then
+    var cands: [Str] = []
+    for fk in cx.fns.keys do
+      push(cands, fk)
+    end for
+    for bk in builtin_names() do
+      push(cands, bk)
+    end for
+    for vk in cx.variants.keys do
+      push(cands, vk)
+    end for
+    let s = suggest(name, cands)
+    err(inout cx, "unknown-function", e, "unknown function '" ++ name ++ "'", did_you_mean(s, "built-ins: " ++ join(builtin_names(), ", ")))
+    check_args_loose(inout cx, e, MValue)
+    return T_ERR
+  end if
+  cx.ast.nodes[e].ref = f
+  cx.ast.nodes[e].what = RFn
+  if cx.where == "constant" then
+    err(inout cx, "const-init", e, "constant " ++ nname(cx, cx.cur_fn) ++ " can't call fn " ++ name, "constant initializers may use literals, operators, other constants and pure built-ins")
+  end if
+  let fx = fn_effects(cx.ast, f)
+  for i in 0 ..< cnk(cx, fx) do
+    require_effect(inout cx, nname(cx, ckid(cx, fx, i)), e, "fn " ++ name)
+  end for
+  let ret = cx.ast.nodes[f].ty
+  let ps = fn_params(cx.ast, f)
+  if not arity_ok(inout cx, e, cnk(cx, ps)) then
+    check_args_loose(inout cx, e, MBorrow)
+    return ret
+  end if
+  var roots = map_new()
+  for i in 0 ..< n do
+    let pn = ckid(cx, ps, i)
+    let pname = nname(cx, pn)
+    let pty = cx.ast.nodes[pn].ty
+    let w = ckid(cx, e, i)
+    let a = unwrap(cx, w)
+    let marked = nkind(cx, w) == NInout
+    if cx.ast.nodes[pn].flag then
+      if not marked then
+        err(inout cx, "inout-mismatch", a, "parameter '" ++ pname ++ "' of " ++ name ++ " is inout; the call must say so", "write '" ++ name ++ "(..., inout " ++ src_of(cx, a) ++ ", ...)' so the mutation is visible here")
+      end if
+      let t = check_expr(inout cx, a, -1, MBase)
+      cx.ast.nodes[w].ty = t
+      check_mutable_place(inout cx, a, "pass as inout")
+      if not ty_eq(t, pty) then
+        err(inout cx, "type-mismatch", a, "inout argument '" ++ pname ++ "' has type " ++ ty_str(cx, t) ++ ", expected " ++ ty_str(cx, pty), "inout types must match exactly")
+      end if
+      if is_place(cx, a) then
+        let rn = nname(cx, place_root(cx, a))
+        if map_has(roots, rn) then
+          err(inout cx, "inout-alias", a, "'" ++ rn ++ "' is passed as inout twice in one call", "each inout argument must be a different variable")
+        end if
+        map_set(inout roots, rn, i)
+      end if
+    else
+      if marked then
+        err(inout cx, "inout-mismatch", a, "parameter '" ++ pname ++ "' of " ++ name ++ " is not inout", "remove 'inout' here")
+      end if
+      let _ = expect_ty(inout cx, a, pty, "argument '" ++ pname ++ "' of " ++ name, MBorrow)
+      cx.ast.nodes[w].ty = cx.ast.nodes[a].ty
+    end if
+  end for
+  for j in 0 ..< n do
+    let pn2 = ckid(cx, ps, j)
+    let a2 = unwrap(cx, ckid(cx, e, j))
+    if not cx.ast.nodes[pn2].flag and is_place(cx, a2) and needs_copy_any(cx, cx.ast.nodes[a2].ty) then
+      let rn2 = nname(cx, place_root(cx, a2))
+      if map_has(roots, rn2) then
+        err(inout cx, "inout-alias", a2, "'" ++ rn2 ++ "' is borrowed here while also passed as inout in the same call", "copy it into a let first: 'let " ++ rn2 ++ "_now = " ++ rn2 ++ "'")
+      end if
+    end if
+  end for
+  return ret
+end fn check_call
+
+fn check_special(inout cx: Cx, e: Int, expected: Int) -> Int
+  let name = nname(cx, e)
+  if name == "show" then
+    if not arity_ok(inout cx, e, 1) then
+      return T_STR
+    end if
+    let t = check_expr(inout cx, ckid(cx, e, 0), -1, MValue)
+    if t != T_INT and t != T_FLOAT and t != T_BOOL and t != T_STR and t != T_ERR and not simple_enum(cx, t) then
+      err(inout cx, "type-mismatch", e, "show works on Int, Float, Bool, Str and payload-free enums; not " ++ ty_str(cx, t), "write a describe function for your type")
+    end if
+    return T_STR
+  end if
+  if name == "len" then
+    if not arity_ok(inout cx, e, 1) then
+      return T_INT
+    end if
+    let t2 = check_expr(inout cx, ckid(cx, e, 0), -1, MBorrow)
+    if tk(cx, t2) != YArr and t2 != T_STR and t2 != T_ERR then
+      err(inout cx, "type-mismatch", e, "len works on arrays and Str, not " ++ ty_str(cx, t2), "")
+    end if
+    return T_INT
+  end if
+  if name == "push" then
+    if not arity_ok(inout cx, e, 2) then
+      return T_UNIT
+    end if
+    let tgt = ckid(cx, e, 0)
+    let val = ckid(cx, e, 1)
+    let t3 = check_expr(inout cx, tgt, -1, MBase)
+    check_mutable_place(inout cx, tgt, "push to")
+    if t3 == T_ERR then
+      let _ = check_expr(inout cx, val, -1, MValue)
+      return T_UNIT
+    end if
+    if tk(cx, t3) != YArr then
+      err(inout cx, "type-mismatch", tgt, "push needs an array, got " ++ ty_str(cx, t3), "")
+      return T_UNIT
+    end if
+    let _ = expect_ty(inout cx, val, cx.tys[t3].el, "pushed value", MValue)
+    escape(inout cx, val)
+    return T_UNIT
+  end if
+  if name == "pop" then
+    if not arity_ok(inout cx, e, 1) then
+      return T_ERR
+    end if
+    let ptgt = ckid(cx, e, 0)
+    let pt = check_expr(inout cx, ptgt, -1, MBase)
+    check_mutable_place(inout cx, ptgt, "pop from")
+    if pt == T_ERR then
+      return T_ERR
+    end if
+    if tk(cx, pt) != YArr then
+      err(inout cx, "type-mismatch", ptgt, "pop needs an array, got " ++ ty_str(cx, pt), "")
+      return T_ERR
+    end if
+    return cx.tys[pt].el
+  end if
+  # array(n, fill)
+  if not arity_ok(inout cx, e, 2) then
+    return T_ERR
+  end if
+  let _ = expect_ty(inout cx, ckid(cx, e, 0), 1, "array length", MValue)
+  var hint_el = -1
+  if expected >= 0 and tk(cx, expected) == YArr then
+    hint_el = cx.tys[expected].el
+  end if
+  let el = check_expr(inout cx, ckid(cx, e, 1), hint_el, MBorrow)
+  if el == T_UNIT then
+    err(inout cx, "unit-value", e, "arrays of Unit are not allowed", "")
+  end if
+  if el == T_ERR then
+    return T_ERR
+  end if
+  return intern(inout cx, YArr, "", el)
+end fn check_special
+
+fn check_mutable_place(inout cx: Cx, tgt: Int, verb: Str)
+  if not is_place(cx, tgt) then
+    err(inout cx, "not-assignable", tgt, "can only " ++ verb ++ " a variable, field or element", "")
+    return
+  end if
+  let root = place_root(cx, tgt)
+  let b = cx.ast.nodes[root].bind
+  if b != BNone and not mutable_kind(b) then
+    let rname = nname(cx, root)
+    var what = "immutable"
+    if b == BLet then
+      what = "a let binding"
+    else if b == BParam then
+      what = "a parameter"
+    else if b == BConst then
+      what = "a constant"
+    end if
+    var hint = "copy it first: 'var " ++ rname ++ "2 = " ++ rname ++ "'"
+    if b != BParam and b != BConst then
+      let li = lookup(cx, rname)
+      var line = 0
+      if li >= 0 then
+        line = cx.sc_lines[li]
+      end if
+      hint = "declare it with 'var' (line " ++ show(line) ++ ")"
+    end if
+    err(inout cx, "immutable", tgt, "can't " ++ verb ++ " '" ++ rname ++ "': it is " ++ what, hint)
+  end if
+end fn check_mutable_place
+
+# ---------- statements ----------
+
+fn has_break(cx: Cx, block: Int) -> Bool
+  for i in 0 ..< cnk(cx, block) do
+    let s = ckid(cx, block, i)
+    let k = nkind(cx, s)
+    if k == NBreak then
+      return true
+    end if
+    if k == NIf then
+      for j in 1 ..< cnk(cx, s) do
+        if nkind(cx, ckid(cx, s, j)) == NBlock and has_break(cx, ckid(cx, s, j)) then
+          return true
+        end if
+      end for
+    end if
+    if k == NMatch then
+      for j2 in 1 ..< cnk(cx, s) do
+        if has_break(cx, ckid(cx, ckid(cx, s, j2), 0)) then
+          return true
+        end if
+      end for
+    end if
+  end for
+  return false
+end fn has_break
+
+fn if_arms(cx: Cx, s: Int) -> Int
+  var n = cnk(cx, s)
+  if cx.ast.nodes[s].flag then
+    n = n - 1
+  end if
+  return n / 2
+end fn if_arms
+
+fn returns(cx: Cx, block: Int) -> Bool
+  for i in 0 ..< cnk(cx, block) do
+    let s = ckid(cx, block, i)
+    let k = nkind(cx, s)
+    if k == NReturn then
+      return true
+    end if
+    if k == NIf and cx.ast.nodes[s].flag then
+      var all = true
+      for a in 0 ..< if_arms(cx, s) do
+        if not returns(cx, ckid(cx, s, a * 2 + 1)) then
+          all = false
+        end if
+      end for
+      if all and returns(cx, ckid(cx, s, cnk(cx, s) - 1)) then
+        return true
+      end if
+    end if
+    if k == NMatch and cx.ast.nodes[s].exh then
+      var all2 = true
+      for c in 1 ..< cnk(cx, s) do
+        if not returns(cx, ckid(cx, ckid(cx, s, c), 0)) then
+          all2 = false
+        end if
+      end for
+      if all2 then
+        return true
+      end if
+    end if
+    if k == NWhile then
+      let cond = ckid(cx, s, 0)
+      if nkind(cx, cond) == NBool and cx.ast.nodes[cond].flag and not has_break(cx, ckid(cx, s, 1)) then
+        return true
+      end if
+    end if
+  end for
+  return false
+end fn returns
+
+fn check_block(inout cx: Cx, block: Int)
+  sc_push(inout cx)
+  for i in 0 ..< cnk(cx, block) do
+    check_stmt(inout cx, ckid(cx, block, i))
+  end for
+  sc_pop(inout cx)
+end fn check_block
+
+fn check_stmt(inout cx: Cx, s: Int)
+  let k = nkind(cx, s)
+  if k == NLet then
+    let tyn = ckid(cx, s, 0)
+    let init = ckid(cx, s, 1)
+    let name = nname(cx, s)
+    var t = T_ERR
+    if tyn >= 0 then
+      t = resolve_type(inout cx, tyn)
+      if t != T_ERR then
+        let _ = expect_ty(inout cx, init, t, "value of '" ++ name ++ "'", MValue)
+      else
+        let _ = check_expr(inout cx, init, -1, MValue)
+      end if
+    else
+      t = check_expr(inout cx, init, -1, MValue)
+    end if
+    if t == T_UNIT then
+      err(inout cx, "unit-value", s, "'" ++ name ++ "' would have type Unit", "call the function as a statement instead")
+    end if
+    let is_var = cx.ast.nodes[s].flag
+    if is_var then
+      escape(inout cx, init)
+    end if
+    var kind = BLet
+    if is_var then
+      kind = BVar
+    end if
+    declare(inout cx, name, t, kind, s)
+    cx.ast.nodes[s].ty = t
+    return
+  end if
+  if k == NAssign then
+    let target = ckid(cx, s, 0)
+    let value = ckid(cx, s, 1)
+    let t2 = check_expr(inout cx, target, -1, MBase)
+    check_mutable_place(inout cx, target, "assign to")
+    if t2 != T_ERR then
+      let _ = expect_ty(inout cx, value, t2, "assigned value", MValue)
+    else
+      let _ = check_expr(inout cx, value, -1, MValue)
+    end if
+    escape(inout cx, value)
+    return
+  end if
+  if k == NExpr then
+    let x = ckid(cx, s, 0)
+    let xk = nkind(cx, x)
+    if xk == NHole then
+      err(inout cx, "hole-untyped", x, "a hole can't stand alone as a statement", "use it where a value of known type is needed")
+      return
+    end if
+    let t3 = check_expr(inout cx, x, -1, MValue)
+    if xk != NCall then
+      var hint = ""
+      if xk == NBin and nname(cx, x) == "==" then
+        hint = "did you mean '=' (assignment)?"
+      end if
+      err(inout cx, "unused-value", s, "this expression does nothing", hint)
+    else if t3 != T_UNIT and t3 != T_ERR then
+      let cn = nname(cx, x)
+      err(inout cx, "unused-value", s, "result of " ++ cn ++ "(...) (" ++ ty_str(cx, t3) ++ ") is ignored", "write 'let _ = " ++ cn ++ "(...)' to discard it on purpose")
+    end if
+    return
+  end if
+  if k == NIf then
+    for a in 0 ..< if_arms(cx, s) do
+      let _ = expect_ty(inout cx, ckid(cx, s, a * 2), 3, "if condition", MValue)
+      check_block(inout cx, ckid(cx, s, a * 2 + 1))
+    end for
+    if cx.ast.nodes[s].flag then
+      check_block(inout cx, ckid(cx, s, cnk(cx, s) - 1))
+    end if
+    return
+  end if
+  if k == NWhile then
+    let _ = expect_ty(inout cx, ckid(cx, s, 0), 3, "while condition", MValue)
+    cx.loops = cx.loops + 1
+    check_block(inout cx, ckid(cx, s, 1))
+    cx.loops = cx.loops - 1
+    return
+  end if
+  if k == NFor then
+    check_for(inout cx, s)
+    return
+  end if
+  if k == NMatch then
+    check_match(inout cx, s)
+    return
+  end if
+  if k == NReturn then
+    let rt = cx.ast.nodes[cx.cur_fn].ty
+    let fname = nname(cx, cx.cur_fn)
+    if cnk(cx, s) > 0 then
+      let v = ckid(cx, s, 0)
+      if rt == T_UNIT then
+        err(inout cx, "type-mismatch", s, "fn " ++ fname ++ " returns Unit; it can't return a value", "add '-> Type' to the signature")
+        let _ = check_expr(inout cx, v, -1, MValue)
+      else
+        let _ = expect_ty(inout cx, v, rt, "returned value", MValue)
+        if nkind(cx, v) == NIdent and cx.ast.nodes[v].bind == BVar then
+          cx.ast.nodes[v].copy = false
+        else
+          escape(inout cx, v)
+        end if
+      end if
+    else if rt != T_UNIT then
+      err(inout cx, "type-mismatch", s, "fn " ++ fname ++ " must return a " ++ ty_str(cx, rt), "")
+    end if
+    return
+  end if
+  if k == NBreak or k == NContinue then
+    if cx.loops == 0 then
+      err(inout cx, "outside-loop", s, "'" ++ nname(cx, s) ++ "' outside a loop", "")
+    end if
+    return
+  end if
+end fn check_stmt
+
+fn check_for(inout cx: Cx, s: Int)
+  var t = T_ERR
+  var body = 0
+  if cx.ast.nodes[s].ival == 1 then
+    let _ = expect_ty(inout cx, ckid(cx, s, 0), 1, "range start", MValue)
+    let _ = expect_ty(inout cx, ckid(cx, s, 1), 1, "range end", MValue)
+    t = T_INT
+    body = ckid(cx, s, 2)
+  else
+    let iter = ckid(cx, s, 0)
+    let it = check_expr(inout cx, iter, -1, MValue)
+    if tk(cx, it) != YArr and it != T_ERR then
+      err(inout cx, "type-mismatch", iter, "can only loop over arrays or ranges, not " ++ ty_str(cx, it), "for a count, write 'for i in 0 ..< n do'")
+    end if
+    if tk(cx, it) == YArr then
+      t = cx.tys[it].el
+    end if
+    body = ckid(cx, s, 1)
+  end if
+  cx.ast.nodes[s].ty = t
+  sc_push(inout cx)
+  declare(inout cx, nname(cx, s), t, BLet, s)
+  cx.loops = cx.loops + 1
+  check_block(inout cx, body)
+  cx.loops = cx.loops - 1
+  sc_pop(inout cx)
+end fn check_for
+
+fn check_match(inout cx: Cx, s: Int)
+  let t = check_expr(inout cx, ckid(cx, s, 0), -1, MValue)
+  let n = cnk(cx, s)
+  if t == T_ERR then
+    for i in 1 ..< n do
+      check_block(inout cx, ckid(cx, ckid(cx, s, i), 0))
+    end for
+    return
+  end if
+  if tk(cx, t) != YEnum then
+    err(inout cx, "type-mismatch", ckid(cx, s, 0), "match works on enums, not " ++ ty_str(cx, t), "use if / else if for other values")
+    return
+  end if
+  let ename = cx.tys[t].name
+  let decl = map_get(cx.types, ename)
+  var covered: [Str] = []
+  var wild = false
+  for i2 in 1 ..< n do
+    let c = ckid(cx, s, i2)
+    let cname = nname(cx, c)
+    sc_push(inout cx)
+    if wild then
+      err(inout cx, "unreachable", c, "case after '_' can never run", "")
+    end if
+    if cname == "_" then
+      wild = true
+    else
+      let v = map_get(cx.variants, cname)
+      if v < 0 or cx.ast.nodes[v].ref != decl then
+        let s2 = suggest(cname, record_fields(cx, decl))
+        err(inout cx, "unknown-variant", c, ename ++ " has no variant '" ++ cname ++ "'", did_you_mean(s2, "variants: " ++ join(record_fields(cx, decl), ", ")))
+      else
+        cx.ast.nodes[c].ref = v
+        if str_in(cname, covered) then
+          err(inout cx, "duplicate", c, "variant " ++ cname ++ " is matched twice", "")
+        end if
+        push(covered, cname)
+        let nb = cnk(cx, c) - 1
+        if nb != cnk(cx, v) then
+          err(inout cx, "arity", c, cname ++ " has " ++ show(cnk(cx, v)) ++ " field(s) (" ++ join(record_fields(cx, v), ", ") ++ "), pattern binds " ++ show(nb), "")
+        end if
+        for j in 0 ..< nb do
+          if j < cnk(cx, v) then
+            let bn = ckid(cx, c, j + 1)
+            let bname = nname(cx, bn)
+            let bty = cx.ast.nodes[ckid(cx, v, j)].ty
+            declare(inout cx, bname, bty, BLet, c)
+          end if
+        end for
+      end if
+    end if
+    check_block(inout cx, ckid(cx, c, 0))
+    sc_pop(inout cx)
+  end for
+  var missing: [Str] = []
+  for vn in record_fields(cx, decl) do
+    if not str_in(vn, covered) then
+      push(missing, vn)
+    end if
+  end for
+  cx.ast.nodes[s].exh = wild or len(missing) == 0
+  if not cx.ast.nodes[s].exh then
+    var suffix = ""
+    if cnk(cx, map_get(cx.variants, missing[0])) > 0 then
+      suffix = "(...)"
+    end if
+    err(inout cx, "non-exhaustive", s, "match on " ++ ename ++ " is missing: " ++ join(missing, ", "), "add 'case " ++ missing[0] ++ suffix ++ "' or 'case _'")
+  end if
+end fn check_match
+
+# ---------- declarations ----------
+
+fn resolve_type(inout cx: Cx, n: Int) -> Int
+  let k = nkind(cx, n)
+  if k == NTArr then
+    let el = resolve_type(inout cx, ckid(cx, n, 0))
+    if el == T_ERR then
+      return T_ERR
+    end if
+    return intern(inout cx, YArr, "", el)
+  end if
+  let name = nname(cx, n)
+  if k == NTPrim then
+    if name == "Int" then
+      return T_INT
+    else if name == "Float" then
+      return T_FLOAT
+    else if name == "Bool" then
+      return T_BOOL
+    else if name == "Str" then
+      return T_STR
+    end if
+    return T_UNIT
+  end if
+  let d = map_get(cx.types, name)
+  if d < 0 then
+    var cands: [Str] = []
+    for tn in cx.types.keys do
+      push(cands, tn)
+    end for
+    for pn in ["Int", "Float", "Bool", "Str", "Unit"] do
+      push(cands, pn)
+    end for
+    err(inout cx, "unknown-type", n, "unknown type '" ++ name ++ "'", did_you_mean(suggest(name, cands), ""))
+    return T_ERR
+  end if
+  if nkind(cx, d) == NRecord then
+    return intern(inout cx, YRec, name, -1)
+  end if
+  return intern(inout cx, YEnum, name, -1)
+end fn resolve_type
+
+fn resolve_fields(inout cx: Cx, owner: Int, what: Str)
+  var seen: [Str] = []
+  for i in 0 ..< cnk(cx, owner) do
+    let f = ckid(cx, owner, i)
+    let fname = nname(cx, f)
+    if str_in(fname, seen) then
+      err(inout cx, "duplicate", f, "field '" ++ fname ++ "' appears twice in " ++ what, "")
+    end if
+    push(seen, fname)
+    let t = resolve_type(inout cx, fn_params(cx.ast, f))
+    cx.ast.nodes[f].ty = t
+    if t == T_UNIT then
+      err(inout cx, "unit-value", f, "fields cannot have type Unit", "")
+    end if
+  end for
+end fn resolve_fields
+
+fn rec_cycle(cx: Cx, name: Str, path: [Str]) -> [Str]
+  if str_in(name, path) then
+    var found_path = path
+    push(found_path, name)
+    return found_path
+  end if
+  let td = map_get(cx.types, name)
+  for i in 0 ..< cnk(cx, td) do
+    let ft = cx.ast.nodes[ckid(cx, td, i)].ty
+    if tk(cx, ft) == YRec then
+      var np = path
+      push(np, name)
+      let c = rec_cycle(cx, cx.tys[ft].name, np)
+      if len(c) > 0 then
+        return c
+      end if
+    end if
+  end for
+  return []
+end fn rec_cycle
+
+fn check_program(inout cx: Cx, prog: Int)
+  # types
+  for i in 0 ..< cnk(cx, prog) do
+    let d = ckid(cx, prog, i)
+    let dk = nkind(cx, d)
+    if dk == NRecord or dk == NEnum then
+      let name = nname(cx, d)
+      if map_has(cx.types, name) or str_in(name, ["Int", "Float", "Bool", "Str", "Unit"]) then
+        err(inout cx, "duplicate", d, "type '" ++ name ++ "' is already defined", "")
+      else
+        map_set(inout cx.types, name, d)
+      end if
+    end if
+  end for
+  for tname in cx.types.keys do
+    let td = map_get(cx.types, tname)
+    if nkind(cx, td) == NRecord then
+      resolve_fields(inout cx, td, "record " ++ tname)
+    else
+      let et = intern(inout cx, YEnum, tname, -1)
+      for vi in 0 ..< cnk(cx, td) do
+        let v = ckid(cx, td, vi)
+        let vname = nname(cx, v)
+        if map_has(cx.variants, vname) then
+          let other = cx.ast.nodes[map_get(cx.variants, vname)].ref
+          err(inout cx, "duplicate", v, "variant '" ++ vname ++ "' is already defined in enum " ++ nname(cx, other), "variant names are global so that `case Foo` is never ambiguous")
+        else
+          map_set(inout cx.variants, vname, v)
+        end if
+        cx.ast.nodes[v].ival = vi
+        cx.ast.nodes[v].ref = td
+        cx.ast.nodes[v].ty = et
+        resolve_fields(inout cx, v, "variant " ++ vname)
+      end for
+    end if
+  end for
+  for tname2 in cx.types.keys do
+    let td2 = map_get(cx.types, tname2)
+    if nkind(cx, td2) == NRecord then
+      let c = rec_cycle(cx, tname2, [])
+      if len(c) > 0 and c[0] == tname2 then
+        err(inout cx, "recursive-record", td2, "record '" ++ tname2 ++ "' contains itself (" ++ join(c, " -> ") ++ ")", "records are plain values; use an enum (e.g. Leaf | Node(...)) or an array for recursive data")
+      end if
+    end if
+  end for
+  # signatures
+  for i2 in 0 ..< cnk(cx, prog) do
+    let f = ckid(cx, prog, i2)
+    if nkind(cx, f) == NFn then
+      check_signature(inout cx, f)
+    end if
+  end for
+  let main = map_get(cx.fns, "main")
+  if main >= 0 then
+    if cnk(cx, fn_params(cx.ast, main)) > 0 or cx.ast.nodes[main].ty != T_UNIT then
+      err(inout cx, "bad-main", main, "'main' must take no parameters and return Unit", "")
+    end if
+  end if
+  # constants, in order: each sees only the ones before it
+  for ck in 0 ..< cnk(cx, prog) do
+    let c = ckid(cx, prog, ck)
+    if nkind(cx, c) == NConst then
+      push(cx.const_nodes, c)
+    end if
+  end for
+  for c2 in cx.const_nodes do
+    check_const(inout cx, c2)
+  end for
+  # bodies
+  for fi in 0 ..< len(cx.fn_list) do
+    check_fn_body(inout cx, cx.fn_list[fi])
+  end for
+  sort_diags(inout cx)
+end fn check_program
+
+fn check_const(inout cx: Cx, c: Int)
+  let name = nname(cx, c)
+  let dup = str_in(name, cx.const_names)
+  if dup then
+    err(inout cx, "duplicate", c, "constant '" ++ name ++ "' is already defined", "")
+  else if map_has(cx.variants, name) then
+    err(inout cx, "duplicate", c, "'" ++ name ++ "' is already an enum variant", "")
+  end if
+  let t = resolve_type(inout cx, ckid(cx, c, 0))
+  cx.ast.nodes[c].ty = t
+  if t == T_UNIT then
+    err(inout cx, "unit-value", c, "constants cannot have type Unit", "")
+  end if
+  begin_ctx(inout cx, c, "constant", false)
+  let init = ckid(cx, c, 1)
+  if t != T_ERR then
+    let _ = expect_ty(inout cx, init, t, "value of '" ++ name ++ "'", MValue)
+  else
+    let _ = check_expr(inout cx, init, -1, MValue)
+  end if
+  if not dup then
+    push(cx.const_names, name)
+    push(cx.const_tys, t)
+    push(cx.const_lines, cx.ast.nodes[c].line)
+  end if
+end fn check_const
+
+fn check_signature(inout cx: Cx, f: Int)
+  let name = nname(cx, f)
+  if map_has(cx.fns, name) or str_in(name, builtin_names()) then
+    var sfx = ""
+    if str_in(name, builtin_names()) then
+      sfx = " (built-in)"
+    end if
+    err(inout cx, "duplicate", f, "function '" ++ name ++ "' is already defined" ++ sfx, "")
+    return
+  end if
+  if map_has(cx.variants, name) then
+    err(inout cx, "duplicate", f, "'" ++ name ++ "' is already an enum variant", "")
+  end if
+  map_set(inout cx.fns, name, f)
+  push(cx.fn_list, f)
+  let ps = fn_params(cx.ast, f)
+  var seen: [Str] = []
+  for i in 0 ..< cnk(cx, ps) do
+    let pn = ckid(cx, ps, i)
+    let pname = nname(cx, pn)
+    if str_in(pname, seen) then
+      err(inout cx, "duplicate", pn, "parameter '" ++ pname ++ "' appears twice", "")
+    end if
+    push(seen, pname)
+    let t = resolve_type(inout cx, ckid(cx, pn, 0))
+    if t == T_UNIT then
+      err(inout cx, "unit-value", pn, "parameters cannot have type Unit", "")
+    end if
+    cx.ast.nodes[pn].ty = t
+  end for
+  let fx = fn_effects(cx.ast, f)
+  for j in 0 ..< cnk(cx, fx) do
+    let en = ckid(cx, fx, j)
+    let ename = nname(cx, en)
+    if not str_in(ename, ["io", "fs", "time"]) then
+      err(inout cx, "unknown-effect", en, "unknown effect '" ++ ename ++ "'", did_you_mean(suggest(ename, ["io", "fs", "time"]), "known effects: io, fs, time"))
+    end if
+  end for
+  let rn = fn_ret(cx.ast, f)
+  var ret = T_UNIT
+  if rn >= 0 then
+    ret = resolve_type(inout cx, rn)
+  end if
+  cx.ast.nodes[f].ty = ret
+end fn check_signature
+
+fn check_fn_body(inout cx: Cx, f: Int)
+  let name = nname(cx, f)
+  let ret = cx.ast.nodes[f].ty
+  begin_ctx(inout cx, f, "body", true)
+  declare_params(inout cx, f)
+  let body = fn_body(cx.ast, f)
+  check_block(inout cx, body)
+  if ret != T_UNIT and not returns(cx, body) then
+    err(inout cx, "missing-return", f, "fn " ++ name ++ " can reach its end without returning a " ++ ty_str(cx, ret), "make sure every branch ends in return")
+  end if
+  let rq = fn_requires(cx.ast, f)
+  for i in 0 ..< cnk(cx, rq) do
+    begin_ctx(inout cx, f, "requires", false)
+    declare_params(inout cx, f)
+    let _ = expect_ty(inout cx, ckid(cx, rq, i), 3, "requires clause", MValue)
+  end for
+  let es = fn_ensures(cx.ast, f)
+  for j in 0 ..< cnk(cx, es) do
+    begin_ctx(inout cx, f, "ensures", false)
+    declare_params(inout cx, f)
+    let en = ckid(cx, es, j)
+    if ret != T_UNIT then
+      declare(inout cx, "result", ret, BLet, en)
+    end if
+    let _ = expect_ty(inout cx, en, T_BOOL, "ensures clause", MValue)
+  end for
+  let xs = fn_examples(cx.ast, f)
+  for k in 0 ..< cnk(cx, xs) do
+    begin_ctx(inout cx, f, "example", false)
+    let _ = expect_ty(inout cx, ckid(cx, xs, k), 3, "example", MValue)
+  end for
+end fn check_fn_body
+
+fn diag_before(a: Diag, b: Diag) -> Bool
+  return a.line < b.line or (a.line == b.line and a.col < b.col)
+end fn diag_before
+
+fn sort_diags(inout cx: Cx)
+  # stable insertion sort by (line, col)
+  for i in 1 ..< len(cx.diags) do
+    let d = cx.diags[i]
+    var j = i - 1
+    while j >= 0 and diag_before(d, cx.diags[j]) do
+      cx.diags[j + 1] = cx.diags[j]
+      j = j - 1
+    end while
+    cx.diags[j + 1] = d
+  end for
+end fn sort_diags

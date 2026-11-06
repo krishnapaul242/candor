@@ -1,0 +1,109 @@
+# ===================== driver =====================
+# candorc check <file.cnd>
+# candorc build <file.cnd> <out.c> [--allow-holes]
+
+fn render_diag(d: Diag, file: Str, lines: [Str]) -> Str
+  var s = "error[" ++ d.code ++ "] " ++ file ++ ":" ++ show(d.line) ++ ":" ++ show(d.col) ++ "\n  " ++ d.msg ++ "\n"
+  if d.line >= 1 and d.line <= len(lines) then
+    s = s ++ "   " ++ pad_left(show(d.line), 4) ++ " | " ++ lines[d.line - 1] ++ "\n          " ++ repeat_str(" ", max_int(0, d.col - 1)) ++ "^\n"
+  end if
+  if d.hint != "" then
+    s = s ++ "  hint: " ++ d.hint ++ "\n"
+  end if
+  return s
+end fn render_diag
+
+fn render_hole(h: Hole, file: Str) -> Str
+  var s = "hole ?" ++ h.name ++ " : " ++ h.ty ++ "   (" ++ file ++ ":" ++ show(h.line) ++ ":" ++ show(h.col) ++ ", in " ++ h.fn_name ++ ")\n"
+  if h.scope != "" then
+    s = s ++ "  in scope: " ++ h.scope ++ "\n"
+  end if
+  return s
+end fn render_hole
+
+fn usage()
+  effects io
+  eprint("candorc — the Candor compiler, written in Candor")
+  eprint("usage:")
+  eprint("  candorc check <file.cnd>")
+  eprint("  candorc build <file.cnd> <out.c> [--allow-holes]")
+end fn usage
+
+fn report_and_exit(diags: [Diag], file: Str, src: Str)
+  effects io
+  let lines = split_lines(src)
+  for d in diags do
+    eprint(slice(render_diag(d, file, lines), 0, len(render_diag(d, file, lines)) - 1))
+  end for
+  exit(1)
+end fn report_and_exit
+
+fn main()
+  effects io, fs
+  let argv = args()
+  if len(argv) < 2 then
+    usage()
+    exit(2)
+    return
+  end if
+  let cmd = argv[0]
+  let file = argv[1]
+  if cmd != "check" and cmd != "build" then
+    usage()
+    exit(2)
+    return
+  end if
+  let src = read_file(file)
+
+  let lx = lex(src)
+  if lx.failed then
+    report_and_exit([lx.err], file, src)
+    return
+  end if
+  let p = parse_program(src, lx.toks)
+  if p.failed then
+    report_and_exit([p.err], file, src)
+    return
+  end if
+  var cx = new_cx(p.ast, src)
+  check_program(inout cx, len(cx.ast.nodes) - 1)
+
+  if cmd == "build" and len(cx.diags) == 0 and not map_has(cx.fns, "main") then
+    push(cx.diags, Diag { code: "no-main", msg: "no 'fn main()' to run", hint: "add a main function", line: 1, col: 1 })
+  end if
+  if len(cx.diags) > 0 then
+    report_and_exit(cx.diags, file, src)
+    return
+  end if
+
+  if cmd == "check" then
+    for h in cx.holes do
+      let r = render_hole(h, file)
+      eprint(slice(r, 0, len(r) - 1))
+    end for
+    eprint("ok: " ++ show(len(cx.fn_list)) ++ " fn(s), " ++ show(len(cx.types.keys)) ++ " type(s), " ++ show(len(cx.holes)) ++ " hole(s)")
+    return
+  end if
+
+  if len(argv) < 3 then
+    usage()
+    exit(2)
+    return
+  end if
+  var allow_holes = false
+  for a in argv do
+    if a == "--allow-holes" then
+      allow_holes = true
+    end if
+  end for
+  if len(cx.holes) > 0 and not allow_holes then
+    for h2 in cx.holes do
+      let r2 = render_hole(h2, file)
+      eprint(slice(r2, 0, len(r2) - 1))
+    end for
+    eprint("refusing to build: " ++ show(len(cx.holes)) ++ " unfilled hole(s). Fill them, or pass --allow-holes (they trap if reached).")
+    exit(1)
+    return
+  end if
+  write_file(argv[2], gen_program(cx))
+end fn main

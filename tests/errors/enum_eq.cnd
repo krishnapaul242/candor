@@ -1,0 +1,11 @@
+type Shape = enum
+  Dot
+  Circle(r: Float)
+end type Shape
+
+fn main()
+  effects io
+  let a = Dot
+  print(show(a == Dot))
+  print(show(a))
+end fn main

@@ -1,0 +1,8 @@
+fn main()
+  effects io
+  var d = 3
+  while d >= 0 do
+    print(show(12 / d))
+    d = d - 1
+  end while
+end fn main

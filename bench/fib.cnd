@@ -1,0 +1,11 @@
+fn fib(n: Int) -> Int
+  if n < 2 then
+    return n
+  end if
+  return fib(n - 1) + fib(n - 2)
+end fn fib
+
+fn main()
+  effects io
+  print(show(fib(40)))
+end fn main

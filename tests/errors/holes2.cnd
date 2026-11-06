@@ -1,0 +1,9 @@
+let RATE: Float = 1.5
+let NAMES: [Str] = ["a"]
+
+fn convert(amount: Float) -> Float
+  let fee: Float = ?fee
+  return amount * RATE + fee
+end fn convert
+
+let LATE: Float = ?late_value

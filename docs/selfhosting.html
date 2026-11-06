@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candor Self-Hosting</title>
+<meta name="description" content="How Candor compiles itself: the bootstrap stages, the fixed point, the differential tests, and field notes on writing a compiler in Candor.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="./">Candor<span>.</span></a>
+  <nav class="site">
+    <a href="./">Overview</a>
+    <a href="guide.html">Language guide</a>
+    <a href="selfhosting.html" aria-current="page">Self-hosting</a>
+    <a href="roadmap.html">Roadmap</a>
+    <a class="gh" href="https://github.com/krishnapaul242/candor">GitHub</a>
+  </nav>
+</div></header>
+
+<main><div class="prose">
+  <h1>Candor compiles Candor</h1>
+  <p class="lede"><code>selfhost/candorc.cnd</code> is a complete Candor compiler written in Candor: a lexer, a parser, a checker with every diagnostic, and a C backend. It builds itself, and the result builds itself again, identically.</p>
+
+  <h2>The bootstrap</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Stage</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td>The JavaScript reference compiler, the seed.</td></tr>
+      <tr><td>1</td><td>Stage 0 compiles <code>candorc.cnd</code> into a native <code>candorc1</code>.</td></tr>
+      <tr><td>2</td><td><code>candorc1</code> compiles <code>candorc.cnd</code>, producing <code>stage2.c</code>, which builds <code>candorc2</code>.</td></tr>
+      <tr><td>3, 4</td><td><code>candorc2</code> and then <code>candorc3</code> each compile <code>candorc.cnd</code> again.</td></tr>
+    </tbody>
+  </table></div>
+  <p>The C from stages 2, 3 and 4 must be <strong>byte-identical</strong>. That is the fixed point: the compiler carries itself, and successive generations stop changing. A compiled compiler then builds itself in about 10&nbsp;ms.</p>
+
+  <h2>How it's checked</h2>
+<pre><code>selfhost/test.sh          # stage 1, comparisons, bootstrap
+FULL=1 selfhost/test.sh   # ...and every benchmark too</code></pre>
+  <ol>
+    <li><strong>Behavior:</strong> every program in <code>tests/run</code>, <code>examples</code> and <code>bench</code> gives identical stdout, stderr and exit code when compiled by <code>candorc</code> and when run by the reference compiler.</li>
+    <li><strong>Diagnostics:</strong> every file in <code>tests/errors</code> gets word-for-word identical errors, hints and caret positions from both compilers. One file alone produces 46 different errors.</li>
+    <li><strong>Fixed point:</strong> stages 2, 3 and 4 match byte for byte.</li>
+  </ol>
+  <p>Every language change goes into <em>both</em> compilers, and the suite keeps them in agreement. So the language can now evolve using itself.</p>
+
+  <h2>Field notes</h2>
+  <p>The point of self-hosting was to learn whether the language holds up for a real program. The full notes are in <a href="https://github.com/krishnapaul242/candor/blob/main/selfhost/NOTES.md"><code>selfhost/NOTES.md</code></a>. The short version:</p>
+
+  <h3>What worked</h3>
+  <ul>
+    <li><strong><code>inout</code> plus borrowed arguments.</strong> The whole compiler threads its state through <code>inout</code> parameters. Every mutation is visible at the call site, and read-only helpers cost nothing.</li>
+    <li><strong>The type checker as a refactoring tool.</strong> Moving the compiler's internals from strings and magic numbers to enums touched about 330 places, using a regex script. The checker reported <em>every</em> site the script got wrong. After those were fixed, the rewritten compiler passed everything and reached a new fixed point on the first run.</li>
+    <li><strong>Labeled <code>end</code>s</strong> stayed readable landmarks across about 4,000 lines.</li>
+  </ul>
+
+  <h3>What hurt, and what changed because of it</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Pain point</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Enums couldn't be compared, so the AST used strings for its kinds</td><td>Fixed: <code>==</code> and <code>show</code> on payload-free enums. The AST now uses <code>NodeKind</code>.</td></tr>
+      <tr><td>No constants, so type ids were magic numbers</td><td>Fixed: top-level constants (<code>T_INT</code>, …).</td></tr>
+      <tr><td>No array <code>pop</code></td><td>Fixed: <code>pop(xs)</code>.</td></tr>
+      <tr><td>No modules: six files joined with <code>cat</code></td><td>Next on the <a href="roadmap.html">roadmap</a></td></tr>
+      <tr><td>No error propagation: a <code>failed</code> flag threaded everywhere</td><td>Planned: generics with <code>Result[T, E]</code></td></tr>
+      <tr><td>Type ids are plain <code>Int</code>s, interchangeable with node ids</td><td>Planned: distinct types</td></tr>
+      <tr><td>No closures</td><td>Open question</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="callout">
+    <p><strong>An honest caveat.</strong> <code>candorc</code> was a <em>port</em> of a design first written in JavaScript, which is easier than designing a compiler from scratch. The clean first runs say more about the porting than about the language. The pain points are the more trustworthy signal.</p>
+  </div>
+</div></main>
+
+<footer class="site"><div class="inner">
+  Candor · <a href="https://github.com/krishnapaul242/candor">github.com/krishnapaul242/candor</a> · designed and built by Claude (Anthropic) with Krishna Paul
+</div></footer>
+</body>
+</html>

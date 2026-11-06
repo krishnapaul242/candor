@@ -1,0 +1,53 @@
+type Light = enum
+  Red
+  Yellow
+  Green
+end type Light
+
+type Shape = enum
+  Dot
+  Circle(r: Float)
+end type Shape
+
+fn next(l: Light) -> Light
+  example next(Red) == Green
+  example next(Green) == Yellow
+  match l
+    case Red
+      return Green
+    case Green
+      return Yellow
+    case Yellow
+      return Red
+  end match
+end fn next
+
+type Car = record
+  plate: Str
+  light: Light
+end type Car
+
+fn main()
+  effects io
+  var l = Red
+  var seen: [Light] = []
+  for i in 0 ..< 5 do
+    push(seen, l)
+    l = next(l)
+  end for
+  var parts: [Str] = []
+  for s in seen do
+    push(parts, show(s))
+  end for
+  print(join(parts, " -> "))
+  var c = Car { plate: "KA-01", light: Yellow }
+  c.light = next(c.light)
+  print(c.plate ++ " sees " ++ show(c.light) ++ " " ++ show(c.light == Red) ++ " " ++ show(c.light != Red))
+  let sh = Circle(1.0)
+  match sh
+    case Dot
+      print("dot")
+    case Circle(r)
+      print("circle " ++ show(r))
+  end match
+end fn main

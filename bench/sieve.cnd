@@ -1,0 +1,24 @@
+fn count_primes(n: Int) -> Int
+  var sieve = array(n + 1, true)
+  var count = 0
+  for i in 2 ..= n do
+    if sieve[i] then
+      count = count + 1
+      var j = i * i
+      while j <= n do
+        sieve[j] = false
+        j = j + i
+      end while
+    end if
+  end for
+  return count
+end fn count_primes
+
+fn main()
+  effects io
+  var total = 0
+  for k in 0 ..< 10 do
+    total = total + count_primes(20000000)
+  end for
+  print(show(total))
+end fn main

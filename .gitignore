@@ -1,0 +1,6 @@
+bench/*.bin
+*.c
+build/
+selfhost/candorc.cnd
+.DS_Store
+node_modules/

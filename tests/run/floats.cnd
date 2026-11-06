@@ -1,0 +1,13 @@
+fn main()
+  effects io
+  let xs = [0.1, 1.0, -2.5, 100.0, 1e21, 1e20, 1.5e-7, 0.000001, 123456789.125, 3.0e-300, 1.0 / 3.0, 2.0 / 3.0, -0.0, 1.0 / 0.0, -1.0 / 0.0, 0.0 / 0.0, 5e-324, 1.7976931348623157e308, sqrt(2.0), to_float(9007199254740991)]
+  for x in xs do
+    print(show(x))
+  end for
+  print(show(to_int(-3.9)) ++ " " ++ show(to_int(1e15)))
+  var acc = 0.0
+  for i in 1 ..= 1000 do
+    acc = acc + 1.0 / to_float(i * i)
+  end for
+  print(show(acc))
+end fn main

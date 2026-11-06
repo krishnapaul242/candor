@@ -1,0 +1,33 @@
+# Longest Collatz chain below 2M: pure Int arithmetic where every
+# + and * carries an overflow check.
+
+fn chain_length(start: Int) -> Int
+  requires start >= 1
+  example chain_length(1) == 1
+  example chain_length(6) == 9
+  var n = start
+  var steps = 1
+  while n != 1 do
+    if n % 2 == 0 then
+      n = n / 2
+    else
+      n = 3 * n + 1
+    end if
+    steps = steps + 1
+  end while
+  return steps
+end fn chain_length
+
+fn main()
+  effects io
+  var best = 1
+  var best_len = 1
+  for i in 1 ..< 2000000 do
+    let l = chain_length(i)
+    if l > best_len then
+      best = i
+      best_len = l
+    end if
+  end for
+  print(show(best) ++ " has " ++ show(best_len) ++ " terms")
+end fn main

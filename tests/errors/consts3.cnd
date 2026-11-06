@@ -1,0 +1,21 @@
+let LIMIT: Int = 5
+let A: Int = helper()
+let NOW: Int = clock_ms()
+let ITEMS: [Int] = [1, 2]
+
+fn helper() -> Int
+  return 1
+end fn helper
+
+fn shadow()
+  let LIMIT = 3
+end fn shadow
+
+fn main()
+  LIMIT = 4
+  let y = pop(ITEMS)
+  let xs = [1]
+  let z = pop(xs)
+  var n = 1
+  let w = pop(n)
+end fn main

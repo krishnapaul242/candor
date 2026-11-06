@@ -1,0 +1,6 @@
+fn main()
+  effects io
+  let xs = [1, 2, 3]
+  print("before")
+  print(show(xs[3]))
+end fn main

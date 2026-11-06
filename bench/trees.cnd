@@ -1,0 +1,49 @@
+# Allocation + match: build and walk many short-lived binary trees.
+# Native builds never free (bump allocator), so this also measures peak memory.
+
+type Tree = enum
+  Leaf
+  Node(left: Tree, right: Tree)
+end type Tree
+
+fn make(depth: Int) -> Tree
+  requires depth >= 0
+  if depth == 0 then
+    return Node(Leaf, Leaf)
+  end if
+  return Node(make(depth - 1), make(depth - 1))
+end fn make
+
+fn count(t: Tree) -> Int
+  match t
+    case Leaf
+      return 0
+    case Node(l, r)
+      return 1 + count(l) + count(r)
+  end match
+end fn count
+
+fn pow2(k: Int) -> Int
+  var p = 1
+  for i in 0 ..< k do
+    p = p * 2
+  end for
+  return p
+end fn pow2
+
+fn main()
+  effects io
+  let max_depth = 16
+  let long_lived = make(max_depth)
+  var d = 4
+  while d <= max_depth do
+    let iters = pow2(max_depth - d + 4)
+    var nodes = 0
+    for i in 0 ..< iters do
+      nodes = nodes + count(make(d))
+    end for
+    print(show(iters) ++ " trees of depth " ++ show(d) ++ ": " ++ show(nodes) ++ " nodes")
+    d = d + 2
+  end while
+  print("long lived: " ++ show(count(long_lived)) ++ " nodes")
+end fn main

@@ -1,0 +1,86 @@
+# Heapsort of 2M pseudo-random Ints: array indexing with bounds checks,
+# Int compare/swap in tight loops.
+
+fn random_ints(n: Int, seed: Int) -> [Int]
+  requires seed > 0
+  var out: [Int] = []
+  var x = seed
+  for i in 0 ..< n do
+    x = (x * 48271) % 2147483647
+    push(out, x)
+  end for
+  return out
+end fn random_ints
+
+fn heapsort(xs: [Int]) -> [Int]
+  var a = xs
+  let n = len(a)
+  # heapify
+  var start = n / 2 - 1
+  while start >= 0 do
+    var root = start
+    var sifting = true
+    while sifting do
+      var child = 2 * root + 1
+      if child >= n then
+        sifting = false
+      else
+        if child + 1 < n and a[child] < a[child + 1] then
+          child = child + 1
+        end if
+        if a[root] < a[child] then
+          let t = a[root]
+          a[root] = a[child]
+          a[child] = t
+          root = child
+        else
+          sifting = false
+        end if
+      end if
+    end while
+    start = start - 1
+  end while
+  # pop max to the end, repeatedly
+  var last = n - 1
+  while last > 0 do
+    let top = a[0]
+    a[0] = a[last]
+    a[last] = top
+    var r = 0
+    var going = true
+    while going do
+      var c = 2 * r + 1
+      if c >= last then
+        going = false
+      else
+        if c + 1 < last and a[c] < a[c + 1] then
+          c = c + 1
+        end if
+        if a[r] < a[c] then
+          let t2 = a[r]
+          a[r] = a[c]
+          a[c] = t2
+          r = c
+        else
+          going = false
+        end if
+      end if
+    end while
+    last = last - 1
+  end while
+  return a
+end fn heapsort
+
+fn main()
+  effects io
+  let sorted = heapsort(random_ints(2000000, 42))
+  var ok = true
+  var checksum = 0
+  for i in 0 ..< len(sorted) do
+    if i > 0 and sorted[i - 1] > sorted[i] then
+      ok = false
+    end if
+    checksum = (checksum * 31 + sorted[i]) % 1000000007
+  end for
+  print("sorted: " ++ show(ok) ++ ", checksum " ++ show(checksum))
+end fn main

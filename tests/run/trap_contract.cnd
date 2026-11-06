@@ -1,0 +1,15 @@
+fn sqrt_int(n: Int) -> Int
+  requires n >= 0
+  ensures result * result <= n
+  var r = 0
+  while (r + 1) * (r + 1) <= n do
+    r = r + 1
+  end while
+  return r + 1
+end fn sqrt_int
+
+fn main()
+  effects io
+  print(show(sqrt_int(0)))
+  print(show(sqrt_int(17)))
+end fn main

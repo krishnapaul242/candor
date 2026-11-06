@@ -1,0 +1,16 @@
+fn log_total(xs: [Int]) -> Int
+  var t = 0
+  for x in xs do
+    t = t + x
+  end for
+  print("total: " ++ show(t))
+  return t
+end fn log_total
+
+fn main()
+  effects io
+  let n = log_total([1, 2])
+  let ratio = n / 2.0
+  let name = lenght("abc")
+  n = 5
+end fn main

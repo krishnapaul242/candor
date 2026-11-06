@@ -1,0 +1,37 @@
+fn is_digit(b: Int) -> Bool
+  return b >= 48 and b <= 57
+end fn is_digit
+
+fn words(s: Str) -> [Str]
+  var out: [Str] = []
+  var start = 0
+  for i in 0 ..= len(s) do
+    if i == len(s) or byte_at(s, i) == 32 then
+      if i > start then
+        push(out, slice(s, start, i))
+      end if
+      start = i + 1
+    end if
+  end for
+  return out
+end fn words
+
+fn main()
+  effects io, fs
+  let ws = words("the  quick brown fox")
+  print(join(ws, "|") ++ " (" ++ show(len(ws)) ++ ")")
+  print(show(byte_at("A", 0)) ++ from_byte(66) ++ show(is_digit(byte_at("7", 0))))
+  print(show(parse_float("1.5e3") + parse_float("-0.25")) ++ " " ++ show(parse_float("42")))
+  let e = "é"
+  print(show(len(e)) ++ " " ++ show(byte_at(e, 0)) ++ " " ++ show(byte_at(e, 1)) ++ " " ++ slice(e, 0, 2))
+  var parts: [Str] = []
+  for i in 0 ..< 5 do
+    push(parts, show(i * i))
+  end for
+  write_file("/tmp/candor_strings_test.txt", join(parts, ",") ++ "\nsecond line é")
+  let back = read_file("/tmp/candor_strings_test.txt")
+  print(show(len(back)) ++ ": " ++ back)
+  print(show(len(args())))
+  eprint("to stderr")
+  print(slice("hello", 1, 9))
+end fn main

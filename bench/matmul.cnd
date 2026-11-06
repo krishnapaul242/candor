@@ -1,0 +1,35 @@
+# Dense 500x500 Float matrix multiply over nested arrays [[Float]].
+
+fn matrix(n: Int, seed: Float) -> [[Float]]
+  var m: [[Float]] = []
+  for i in 0 ..< n do
+    var row: [Float] = []
+    for j in 0 ..< n do
+      push(row, seed * to_float(i - j) * to_float(i + j) / to_float(n))
+    end for
+    push(m, row)
+  end for
+  return m
+end fn matrix
+
+fn mul(a: [[Float]], b: [[Float]]) -> [[Float]]
+  let n = len(a)
+  var c = array(n, array(n, 0.0))
+  for i in 0 ..< n do
+    for k in 0 ..< n do
+      let aik = a[i][k]
+      for j in 0 ..< n do
+        c[i][j] = c[i][j] + aik * b[k][j]
+      end for
+    end for
+  end for
+  return c
+end fn mul
+
+fn main()
+  effects io
+  let n = 500
+  let c = mul(matrix(n, 1.0), matrix(n, 2.0))
+  print(show(c[n / 2][n / 2]))
+  print(show(c[7][n - 3]))
+end fn main
