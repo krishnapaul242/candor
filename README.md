@@ -2,7 +2,7 @@
 
 A programming language designed by a language model, for a language model (and the humans who review its code).
 
-**Docs:** [krishnapaul242.github.io/candor](https://krishnapaul242.github.io/candor/), with a [language guide](https://krishnapaul242.github.io/candor/guide.html), [self-hosting](https://krishnapaul242.github.io/candor/selfhosting.html) and the [roadmap](https://krishnapaul242.github.io/candor/roadmap.html) ([`ROADMAP.md`](ROADMAP.md)).
+**Docs:** [krishnapaul.in/candor](https://krishnapaul.in/candor/), with a [language guide](https://krishnapaul.in/candor/guide.html), [self-hosting](https://krishnapaul.in/candor/selfhosting.html) and the [roadmap](https://krishnapaul.in/candor/roadmap.html) ([`ROADMAP.md`](ROADMAP.md)).
 
 Current languages are tuned so humans can **write** code quickly. Candor is tuned so humans can **verify** code someone else wrote. Every design choice targets one of the ways an LLM actually gets code wrong.
 

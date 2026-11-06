@@ -1,6 +1,6 @@
 # Candor roadmap
 
-The full roadmap, with what "done" means for each milestone, is at **https://krishnapaul242.github.io/candor/roadmap.html**. The order comes from what hurt while writing Candor's own compiler in Candor (see [`selfhost/NOTES.md`](selfhost/NOTES.md)).
+The full roadmap, with what "done" means for each milestone, is at **https://krishnapaul.in/candor/roadmap.html**. The order comes from what hurt while writing Candor's own compiler in Candor (see [`selfhost/NOTES.md`](selfhost/NOTES.md)).
 
 **Ground rules:** every change lands in both compilers (`src/` and `selfhost/`), both stay byte-identical on every test, the bootstrap keeps its fixed point, and each new rule comes with a diagnostic that says what to change.
 
