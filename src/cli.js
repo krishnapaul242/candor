@@ -4,8 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { parse } from './parser.js';
-import { CandorError } from './lexer.js';
+import { load } from './loader.js';
 import { check } from './check.js';
 import { genJS } from './jsgen.js';
 import { genC } from './cgen.js';
@@ -39,41 +38,46 @@ if (!cmd || !file || !['check', 'run', 'test', 'build'].includes(cmd)) {
   process.exit(cmd ? 2 : 0);
 }
 
-const src = fs.readFileSync(file, 'utf8');
-const lines = src.split('\n');
+if (!fs.existsSync(file)) { process.stderr.write(`cannot read ${file}\n`); process.exit(2); }
+
+const fileLines = new Map();
+const pathOf = (id) => mod.files[id ?? 0].path;
+const linesOf = (id) => {
+  if (!fileLines.has(id)) fileLines.set(id, mod.files[id ?? 0].src.split('\n'));
+  return fileLines.get(id);
+};
 
 function render(d) {
   const sev = d.severity === 'error' ? '\x1b[31merror\x1b[0m' : '\x1b[33mnote\x1b[0m';
-  let s = `${sev}[${d.code}] ${file}:${d.line}:${d.col}\n  ${d.message}\n`;
-  const ln = lines[d.line - 1];
+  let s = `${sev}[${d.code}] ${pathOf(d.file)}:${d.line}:${d.col}\n  ${d.message}\n`;
+  const ln = linesOf(d.file ?? 0)[d.line - 1];
   if (ln !== undefined) s += `   ${String(d.line).padStart(4)} | ${ln}\n          ${' '.repeat(Math.max(0, d.col - 1))}^\n`;
   if (d.hint) s += `  hint: ${d.hint}\n`;
   return s;
 }
 const renderHole = (h) =>
-  `\x1b[36mhole\x1b[0m ?${h.name} : ${h.type}   (${file}:${h.line}:${h.col}, in ${h.fn})\n` +
+  `\x1b[36mhole\x1b[0m ?${h.name} : ${h.type}   (${pathOf(h.file)}:${h.line}:${h.col}, in ${h.fn})\n` +
   (h.scope.length ? `  in scope: ${h.scope.map((v) => `${v.name}: ${v.type}`).join(', ')}\n` : '');
 
+// Load `file` and everything it uses; stop after parsing if any file failed to parse.
+const mod = load(file);
 function frontEnd() {
-  let program;
-  try { program = parse(src); }
-  catch (e) {
-    if (!(e instanceof CandorError)) throw e;
-    return { program: null, info: null, diags: [e.diag], holes: [] };
-  }
-  const info = check(program);
-  return { program, info, diags: info.diags, holes: info.holes };
+  if (mod.diags.length) return { program: null, info: null, diags: mod.diags, holes: [] };
+  const info = check(mod.program, mod);
+  info.files = mod.files;
+  return { program: mod.program, info, diags: info.diags, holes: info.holes };
 }
 
 const { program, info, diags, holes } = frontEnd();
 const errors = diags.filter((d) => d.severity === 'error');
 if (!errors.length && (cmd === 'run' || cmd === 'build') && !info.fns.has('main')) {
-  errors.push({ severity: 'error', code: 'no-main', message: `no 'fn main()' to run`, line: 1, col: 1, hint: `add:\n\nfn main()\n  effects io\n  print("hello")\nend fn main` });
+  errors.push({ severity: 'error', code: 'no-main', file: 0, message: `no 'fn main()' to run`, line: 1, col: 1, hint: `add:\n\nfn main()\n  effects io\n  print("hello")\nend fn main` });
 }
 
 if (cmd === 'check' || errors.length) {
   if (json) {
-    process.stdout.write(JSON.stringify({ ok: !errors.length, diagnostics: errors.length ? errors : diags, holes }, null, 2) + '\n');
+    const withPath = (x) => ({ ...x, file: pathOf(x.file) });
+    process.stdout.write(JSON.stringify({ ok: !errors.length, diagnostics: (errors.length ? errors : diags).map(withPath), holes: holes.map(withPath) }, null, 2) + '\n');
   } else {
     for (const d of (errors.length ? errors : diags)) process.stderr.write(render(d));
     for (const h of holes) process.stderr.write(renderHole(h));
@@ -88,6 +92,7 @@ function loadJS(opts) {
   const io = {
     write: (s) => fs.writeSync(1, Buffer.from(s, 'latin1')),
     ewrite: (s) => fs.writeSync(2, Buffer.from(s, 'latin1')),
+    exists: (p) => { try { return fs.statSync(Buffer.from(p, 'latin1').toString('utf8')).isFile(); } catch { return false; } },
     read: (p) => { try { return fs.readFileSync(Buffer.from(p, 'latin1').toString('utf8')).toString('latin1'); } catch { return null; } },
     writeFile: (p, c) => { try { fs.writeFileSync(Buffer.from(p, 'latin1').toString('utf8'), Buffer.from(c, 'latin1')); return true; } catch { return false; } },
     exit: (c) => process.exit(c),

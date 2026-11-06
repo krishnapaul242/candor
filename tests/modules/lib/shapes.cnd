@@ -1,0 +1,7 @@
+let UNIT: Float = 1.0
+
+type Shape = enum
+  Square(side: Float)
+  Circle(r: Float)
+  Nothing
+end type Shape

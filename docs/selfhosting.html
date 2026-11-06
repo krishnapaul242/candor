@@ -52,7 +52,7 @@ FULL=1 selfhost/test.sh   # ...and every benchmark too</code></pre>
   <ul>
     <li><strong><code>inout</code> plus borrowed arguments.</strong> The whole compiler threads its state through <code>inout</code> parameters. Every mutation is visible at the call site, and read-only helpers cost nothing.</li>
     <li><strong>The type checker as a refactoring tool.</strong> Moving the compiler's internals from strings and magic numbers to enums touched about 330 places, using a regex script. The checker reported <em>every</em> site the script got wrong. After those were fixed, the rewritten compiler passed everything and reached a new fixed point on the first run.</li>
-    <li><strong>Labeled <code>end</code>s</strong> stayed readable landmarks across about 4,000 lines.</li>
+    <li><strong>Labeled <code>end</code>s</strong> stayed readable landmarks across about 4,200 lines.</li>
   </ul>
 
   <h3>What hurt, and what changed because of it</h3>
@@ -62,7 +62,8 @@ FULL=1 selfhost/test.sh   # ...and every benchmark too</code></pre>
       <tr><td>Enums couldn't be compared, so the AST used strings for its kinds</td><td>Fixed: <code>==</code> and <code>show</code> on payload-free enums. The AST now uses <code>NodeKind</code>.</td></tr>
       <tr><td>No constants, so type ids were magic numbers</td><td>Fixed: top-level constants (<code>T_INT</code>, …).</td></tr>
       <tr><td>No array <code>pop</code></td><td>Fixed: <code>pop(xs)</code>.</td></tr>
-      <tr><td>No modules: six files joined with <code>cat</code></td><td>Next on the <a href="roadmap.html">roadmap</a></td></tr>
+      <tr><td>No modules: six files joined with <code>cat</code></td><td>Fixed in v0.3: <code>candorc</code> is six real modules, and errors cite <code>lexer.cnd:46</code>.</td></tr>
+      <tr><td>No way to <em>move</em> a large value: loading each module copies the AST arena in and out</td><td>Measured: peak memory went from 36 to 54&nbsp;MB. Addressed by v0.6 (copy-on-write)</td></tr>
       <tr><td>No error propagation: a <code>failed</code> flag threaded everywhere</td><td>Planned: generics with <code>Result[T, E]</code></td></tr>
       <tr><td>Type ids are plain <code>Int</code>s, interchangeable with node ids</td><td>Planned: distinct types</td></tr>
       <tr><td>No closures</td><td>Open question</td></tr>

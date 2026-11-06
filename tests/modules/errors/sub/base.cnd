@@ -1,0 +1,9 @@
+use "deep.cnd"
+
+fn base_value() -> Int
+  return deep_value()
+end fn base_value
+
+fn helper() -> Int
+  return 1
+end fn helper

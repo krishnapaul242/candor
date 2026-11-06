@@ -1,3 +1,5 @@
+use "util.cnd"
+
 # ===================== lexer =====================
 
 type Tok = record
@@ -24,7 +26,7 @@ type Lexer = record
 end type Lexer
 
 fn keyword_list() -> [Str]
-  return ["fn", "end", "let", "var", "if", "then", "else", "while", "do", "for", "in", "return", "break", "continue", "match", "case", "type", "record", "enum", "requires", "ensures", "example", "effects", "and", "or", "not", "true", "false", "inout"]
+  return ["fn", "end", "let", "var", "if", "then", "else", "while", "do", "for", "in", "return", "break", "continue", "match", "case", "type", "record", "enum", "requires", "ensures", "example", "effects", "and", "or", "not", "true", "false", "inout", "use"]
 end fn keyword_list
 
 # Tokens after which a newline does not end the statement.
@@ -35,7 +37,7 @@ end fn continues
 fn lex_fail(inout lx: Lexer, msg: Str, hint: Str)
   if not lx.failed then
     lx.failed = true
-    lx.err = Diag { code: "syntax", msg: msg, hint: hint, line: lx.line, col: lx.col }
+    lx.err = Diag { code: "syntax", msg: msg, hint: hint, file: 0, line: lx.line, col: lx.col }
   end if
 end fn lex_fail
 

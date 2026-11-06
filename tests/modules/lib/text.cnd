@@ -1,0 +1,13 @@
+use "../lib/shapes.cnd"
+use "./geometry.cnd"
+
+fn describe(s: Shape) -> Str
+  match s
+    case Square(a)
+      return "square " ++ show(a) ++ " area " ++ show(area(s))
+    case Circle(r)
+      return "circle " ++ show(r) ++ " unit " ++ show(UNIT)
+    case Nothing
+      return "nothing"
+  end match
+end fn describe

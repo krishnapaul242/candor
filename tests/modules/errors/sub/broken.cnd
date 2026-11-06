@@ -1,0 +1,3 @@
+fn oops() -> Int
+  return 1 +
+end fn oops

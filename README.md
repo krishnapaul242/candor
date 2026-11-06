@@ -12,7 +12,8 @@ Current languages are tuned so humans can **write** code quickly. Candor is tune
 | Making up a plausible API when unsure | Typed holes: `?exchange_rate`. They type-check, list what's in scope, trap if reached, and block `build`. |
 | Code that *looks* right | `requires` / `ensures` contracts checked at runtime, plus `example` clauses run by `candor test`. |
 | Losing track of nesting in long blocks | Labeled ends: `end fn name`, `end if`, `end while`. A mismatch points at the opener. |
-| Silent coercions, truthiness, overflow | No implicit conversions. Int overflow, bad indexes and divide-by-zero **trap** with fn + line. |
+| Silent coercions, truthiness, overflow | No implicit conversions. Int overflow, bad indexes and divide-by-zero **trap** with fn, file and line. |
+| "Where does this name come from?" | `use "lexer.cnd"`: a file can only name what it declares or what a file it directly uses declares, and the error says which `use` to add. |
 | Aliasing bugs | Value semantics: `let b = a` then `push(a, 4)` never changes `b`. |
 | Mutation at a distance | A function can only change a caller's variable through an `inout` parameter, and the **call site** must say `inout` too. |
 | Off-by-one ranges | Explicit `0 ..< n` (exclusive) vs `1 ..= n` (inclusive). |
@@ -66,9 +67,11 @@ end type Point               end type Shape
 
 **Expressions:** `+ - * / %` (same-type operands only; Int `/` truncates), `== !=` on Int/Float/Bool/Str and payload-free enums, `< <= > >=` on numbers, `and or not`, `++` string concatenation, `Rec { f: v }`, `[a, b]`, `Variant(args)`, `?hole`.
 
-**Built-ins:** `print(Str)` [io], `eprint(Str)` [io], `show(Int|Float|Bool|Str|payload-free enum)` (an enum shows its variant name), `len([T]|Str)` (bytes), `push(var_array, x)`, `pop(var_array)` (removes and returns the last element; traps if empty), `array(n, fill)`, `to_float`, `to_int` (truncates; traps on out of range), `sqrt`, `assert(Bool)`, `byte_at(s, i)`, `slice(s, a, b)` (byte offsets), `from_byte(n)`, `join(parts, sep)`, `parse_float(s)`, `args()` [io], `exit(code)` [io], `read_file(path)` [fs], `write_file(path, text)` [fs], `clock_ms()` [time].
+**Built-ins:** `print(Str)` [io], `eprint(Str)` [io], `show(Int|Float|Bool|Str|payload-free enum)` (an enum shows its variant name), `len([T]|Str)` (bytes), `push(var_array, x)`, `pop(var_array)` (removes and returns the last element; traps if empty), `array(n, fill)`, `to_float`, `to_int` (truncates; traps on out of range), `sqrt`, `assert(Bool)`, `byte_at(s, i)`, `slice(s, a, b)` (byte offsets), `from_byte(n)`, `join(parts, sep)`, `parse_float(s)`, `args()` [io], `exit(code)` [io], `read_file(path)` [fs], `write_file(path, text)` [fs], `file_exists(path)` [fs], `clock_ms()` [time].
 
 **Effects:** `io`, `fs`, `time`. Calling something with an effect requires declaring it.
+
+**Modules:** `use "path.cnd"` at top level, with the path relative to the file containing it. Each file loads once, and cycles are allowed. Names stay globally unique across the program, and a file can only *name* things declared in itself or in a file it directly `use`s (a `not-imported` error gives the `use` to add). Diagnostics, holes and traps name the real file.
 
 **Copying (value semantics without paying for it everywhere):**
 - Ordinary arguments are *borrowed*: passing even a huge `var` array costs nothing, because the callee can't mutate it.
@@ -83,16 +86,17 @@ src/parser.js  AST; labeled `end` checking
 src/check.js   types, effects, mutability, exhaustiveness, holes, copy analysis
 src/jsgen.js   -> JavaScript (dev path, no build step)
 src/cgen.js    -> C11 + GNU statement expressions (left-to-right evaluation is pinned)
+src/loader.js  follows `use`, parses each file once, merges declarations dependencies-first
 src/cli.js     check / run / test / build
 runtime/candor_rt.h   C runtime shared by both native compilers
-selfhost/      candorc: the compiler again, written in Candor (see below)
+selfhost/      candorc: the compiler again, written in Candor, as real modules (see below)
 ```
 
 Both backends share one checked AST, and `tests/difftest.sh` holds them to identical stdout, stderr and exit codes. Float printing uses a shared shortest-round-trip algorithm, so `show(0.1 + 0.2)` matches everywhere.
 
 ## Self-hosting
 
-`selfhost/candorc.cnd` is a complete Candor compiler (lexer, parser, checker with every diagnostic, C backend) written in Candor: about 3,800 lines, assembled from `selfhost/*.cnd` by `selfhost/build.sh`.
+`selfhost/candorc.cnd` is a complete Candor compiler (lexer, parser, checker with every diagnostic, C backend) written in Candor: about 4,200 lines across six modules (`util`, `lexer`, `parser`, `check`, `cgen` and the `candorc` driver), connected by `use`.
 
 ```sh
 selfhost/test.sh          # stage1 = JS compiler builds candorc; then compares candorc against the JS compiler
@@ -133,5 +137,5 @@ What the numbers show:
 
 - **No memory reclamation in native builds.** A bump allocator never frees, which is fine for batch programs (candorc self-compiles in 36 MB) and bad for long-running ones.
 - Escaping copies are still eager deep copies. `let b = a` on a big `var` array costs O(n).
-- No generics, first-class functions or modules yet. Writing candorc showed these are the next priorities (see `selfhost/NOTES.md`).
+- No generics or first-class functions yet. Writing candorc showed these are the next priorities (see `selfhost/NOTES.md`).
 - Deep recursion: JS reports `trap: stack overflow`, while native crashes with a signal.

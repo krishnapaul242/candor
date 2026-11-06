@@ -74,7 +74,8 @@ end fn main</code></pre>
       <tr><td>Making up a plausible API when unsure</td><td>Typed holes (<code>?exchange_rate</code>) type-check, list what's in scope, trap if reached, and block <code>build</code>.</td></tr>
       <tr><td>Code that looks right but isn't</td><td><code>requires</code> / <code>ensures</code> contracts checked at runtime, plus <code>example</code> clauses run by <code>candor test</code>.</td></tr>
       <tr><td>Losing track of nesting</td><td>Labeled ends: <code>end fn area</code>, <code>end if</code>. A mismatch points at the line that opened the block.</td></tr>
-      <tr><td>Silent coercion, truthiness, overflow</td><td>No implicit conversions. Overflow, out-of-bounds indexes and division by zero trap with the function name and line.</td></tr>
+      <tr><td>Silent coercion, truthiness, overflow</td><td>No implicit conversions. Overflow, out-of-bounds indexes and division by zero trap with the function, file and line.</td></tr>
+      <tr><td>"Where does this name come from?"</td><td><code>use "lexer.cnd"</code>. A file can name only what it, or a file it directly uses, declares. The error says which <code>use</code> to add.</td></tr>
       <tr><td>Aliasing and mutation at a distance</td><td>Value semantics. A callee can change your variable only through <code>inout</code>, and the call site has to say <code>inout</code> too.</td></tr>
       <tr><td>Off-by-one loops</td><td>Explicit ranges: <code>0 ..&lt; n</code> (exclusive) vs <code>1 ..= n</code> (inclusive).</td></tr>
       <tr><td>Name confusion</td><td>No shadowing, globally unique enum variants, "did you mean" suggestions, <code>--json</code> diagnostics.</td></tr>
@@ -93,13 +94,13 @@ selfhost/test.sh                                 # bootstrap the self-hosted com
   <h2>What's in the box</h2>
   <div class="grid">
     <div class="card"><h3>Reference compiler</h3><p>About 2,000 lines of dependency-free JavaScript: lexer, parser, checker, and two backends held to byte-identical behavior.</p></div>
-    <div class="card"><h3>Self-hosted compiler</h3><p><code>candorc</code>, about 4,000 lines of Candor, with every diagnostic word for word. It bootstraps to a fixed point.</p></div>
+    <div class="card"><h3>Self-hosted compiler</h3><p><code>candorc</code>, about 4,200 lines of Candor in six modules, with every diagnostic word for word. It bootstraps to a fixed point.</p></div>
     <div class="card"><h3>Differential tests</h3><p>Every program runs through every compiler path, and stdout, stderr and exit codes must match exactly.</p></div>
     <div class="card"><h3>Field notes</h3><p>An honest record of what hurt while writing a compiler in the language, which drives the <a href="roadmap.html">roadmap</a>.</p></div>
   </div>
 
   <div class="callout prose">
-    <p><strong>Status: experimental (v0.2).</strong> Native builds never free memory, and there are no generics or modules yet. See the <a href="roadmap.html">roadmap</a> for what comes next and why.</p>
+    <p><strong>Status: experimental (v0.3).</strong> Native builds never free memory, and there are no generics yet. See the <a href="roadmap.html">roadmap</a> for what comes next and why.</p>
   </div>
 </main>
 

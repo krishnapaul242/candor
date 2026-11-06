@@ -1,0 +1,199 @@
+use "util.cnd"
+use "lexer.cnd"
+use "parser.cnd"
+use "check.cnd"
+use "cgen.cnd"
+
+# ===================== driver =====================
+# candorc check <file.cnd>
+# candorc build <file.cnd> <out.c> [--allow-holes]
+
+# ---------- module loading ----------
+
+type Loader = record
+  paths: [Str]
+  srcs: [Str]
+  uses: [[Int]]
+  decls: [[Int]]
+  order: [Int]
+  ast: Ast
+  diags: [Diag]
+end type Loader
+
+fn int_in(x: Int, xs: [Int]) -> Bool
+  for y in xs do
+    if y == x then
+      return true
+    end if
+  end for
+  return false
+end fn int_in
+
+# Load `path0` and, recursively, every file it uses. File ids follow discovery
+# order (main = 0); `order` lists files dependencies-first.
+fn load_file(inout ld: Loader, path0: Str, from: Int, orig: Str, line: Int, col: Int) -> Int
+  effects fs
+  let path = norm_path(path0)
+  for i in 0 ..< len(ld.paths) do
+    if ld.paths[i] == path then
+      return i
+    end if
+  end for
+  if from >= 0 and not file_exists(path) then
+    push(ld.diags, Diag { code: "use-missing", msg: "cannot find module '" ++ orig ++ "' (looked for " ++ path ++ ")", hint: "paths in use are relative to the file that contains the use", file: from, line: line, col: col })
+    return -1
+  end if
+  let id = len(ld.paths)
+  let src = read_file(path)
+  push(ld.paths, path)
+  push(ld.srcs, src)
+  push(ld.uses, [])
+  push(ld.decls, [])
+  let lx = lex(src)
+  if lx.failed then
+    var d = lx.err
+    d.file = id
+    push(ld.diags, d)
+    push(ld.order, id)
+    return id
+  end if
+  let p = parse_program(src, lx.toks, id, ld.ast)
+  ld.ast = p.ast
+  if p.failed then
+    push(ld.diags, p.err)
+    push(ld.order, id)
+    return id
+  end if
+  let prog = len(ld.ast.nodes) - 1
+  var ds: [Int] = []
+  for k in 0 ..< nkids(ld.ast, prog) do
+    push(ds, kid(ld.ast, prog, k))
+  end for
+  ld.decls[id] = ds
+  for u in 0 ..< len(p.uses) do
+    let dep = load_file(inout ld, join_path(dir_name(path), p.uses[u]), id, p.uses[u], p.use_lines[u], p.use_cols[u])
+    if dep >= 0 and not int_in(dep, ld.uses[id]) then
+      push(ld.uses[id], dep)
+    end if
+  end for
+  push(ld.order, id)
+  return id
+end fn load_file
+
+# ---------- rendering ----------
+
+fn render_diag(d: Diag, ld: Loader) -> Str
+  let lines = split_lines(ld.srcs[d.file])
+  var s = "error[" ++ d.code ++ "] " ++ ld.paths[d.file] ++ ":" ++ show(d.line) ++ ":" ++ show(d.col) ++ "\n  " ++ d.msg ++ "\n"
+  if d.line >= 1 and d.line <= len(lines) then
+    s = s ++ "   " ++ pad_left(show(d.line), 4) ++ " | " ++ lines[d.line - 1] ++ "\n          " ++ repeat_str(" ", max_int(0, d.col - 1)) ++ "^\n"
+  end if
+  if d.hint != "" then
+    s = s ++ "  hint: " ++ d.hint ++ "\n"
+  end if
+  return s
+end fn render_diag
+
+fn render_hole(h: Hole, ld: Loader) -> Str
+  var s = "hole ?" ++ h.name ++ " : " ++ h.ty ++ "   (" ++ ld.paths[h.file] ++ ":" ++ show(h.line) ++ ":" ++ show(h.col) ++ ", in " ++ h.fn_name ++ ")\n"
+  if h.scope != "" then
+    s = s ++ "  in scope: " ++ h.scope ++ "\n"
+  end if
+  return s
+end fn render_hole
+
+fn eprint_block(s: Str)
+  effects io
+  eprint(slice(s, 0, len(s) - 1))
+end fn eprint_block
+
+fn usage()
+  effects io
+  eprint("candorc — the Candor compiler, written in Candor")
+  eprint("usage:")
+  eprint("  candorc check <file.cnd>")
+  eprint("  candorc build <file.cnd> <out.c> [--allow-holes]")
+end fn usage
+
+fn report_and_exit(diags: [Diag], ld: Loader)
+  effects io
+  for d in diags do
+    eprint_block(render_diag(d, ld))
+  end for
+  exit(1)
+end fn report_and_exit
+
+fn main()
+  effects io, fs
+  let argv = args()
+  if len(argv) < 2 then
+    usage()
+    exit(2)
+    return
+  end if
+  let cmd = argv[0]
+  let file = argv[1]
+  if cmd != "check" and cmd != "build" then
+    usage()
+    exit(2)
+    return
+  end if
+  if not file_exists(file) then
+    eprint("cannot read " ++ file)
+    exit(2)
+    return
+  end if
+
+  var ld = Loader { paths: [], srcs: [], uses: [], decls: [], order: [], ast: Ast { nodes: [], kids: [] }, diags: [] }
+  let _ = load_file(inout ld, file, -1, file, 0, 0)
+  if len(ld.diags) > 0 then
+    report_and_exit(ld.diags, ld)
+    return
+  end if
+  var all: [Int] = []
+  for id in ld.order do
+    for d in ld.decls[id] do
+      push(all, d)
+    end for
+  end for
+  let prog = add_program(inout ld.ast, all)
+  var cx = new_cx(ld.ast, ld.srcs, ld.paths, ld.uses)
+  check_program(inout cx, prog)
+
+  if cmd == "build" and len(cx.diags) == 0 and not map_has(cx.fns, "main") then
+    push(cx.diags, Diag { code: "no-main", msg: "no 'fn main()' to run", hint: "add a main function", file: 0, line: 1, col: 1 })
+  end if
+  if len(cx.diags) > 0 then
+    report_and_exit(cx.diags, ld)
+    return
+  end if
+
+  if cmd == "check" then
+    for h in cx.holes do
+      eprint_block(render_hole(h, ld))
+    end for
+    eprint("ok: " ++ show(len(cx.fn_list)) ++ " fn(s), " ++ show(len(cx.types.keys)) ++ " type(s), " ++ show(len(cx.holes)) ++ " hole(s)")
+    return
+  end if
+
+  if len(argv) < 3 then
+    usage()
+    exit(2)
+    return
+  end if
+  var allow_holes = false
+  for a in argv do
+    if a == "--allow-holes" then
+      allow_holes = true
+    end if
+  end for
+  if len(cx.holes) > 0 and not allow_holes then
+    for h2 in cx.holes do
+      eprint_block(render_hole(h2, ld))
+    end for
+    eprint("refusing to build: " ++ show(len(cx.holes)) ++ " unfilled hole(s). Fill them, or pass --allow-holes (they trap if reached).")
+    exit(1)
+    return
+  end if
+  write_file(argv[2], gen_program(cx))
+end fn main

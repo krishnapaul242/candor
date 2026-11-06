@@ -1,0 +1,13 @@
+use "sub/base.cnd"
+
+fn helper() -> Int
+  return 2
+end fn helper
+
+fn main()
+  effects io
+  let a = base_value()
+  let b = deep_value()
+  let h: Hidden = Hidden { x: SECRET }
+  print(show(a + b + h.x))
+end fn main

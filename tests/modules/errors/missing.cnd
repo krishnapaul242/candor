@@ -1,0 +1,4 @@
+use "nowhere/missing.cnd"
+
+fn main()
+end fn main

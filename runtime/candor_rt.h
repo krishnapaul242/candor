@@ -16,7 +16,7 @@ __attribute__((noreturn, cold)) static void cn_trap(const char* fn, int line, co
 #include <stdarg.h>
 static void cn_trap(const char* fn, int line, const char* fmt, ...) {
   fflush(stdout);
-  fprintf(stderr, "trap in %s at line %d: ", fn, line);
+  fprintf(stderr, "trap in %s:%d: ", fn, line);
   va_list ap; va_start(ap, fmt); vfprintf(stderr, fmt, ap); va_end(ap);
   fputc('\n', stderr);
   exit(1);
@@ -174,6 +174,11 @@ static cn_str cn_read_file(cn_str path, const char* fn, int line) {
   if (fread(p, 1, (size_t)n, f) != (size_t)n) cn_trap(fn, line, "cannot read file %.*s", (int)path.len, path.p);
   fclose(f); p[n] = 0;
   return (cn_str){ n, p };
+}
+#include <sys/stat.h>
+static bool cn_file_exists(cn_str path) {
+  struct stat st;
+  return stat(cn_cstr(path), &st) == 0 && S_ISREG(st.st_mode);
 }
 static void cn_write_file(cn_str path, cn_str c, const char* fn, int line) {
   FILE* f = fopen(cn_cstr(path), "wb");

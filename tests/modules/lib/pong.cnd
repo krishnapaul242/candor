@@ -1,0 +1,8 @@
+use "ping.cnd"
+
+fn pong(n: Int) -> Int
+  if n == 0 then
+    return 0
+  end if
+  return 10 + ping(n - 1)
+end fn pong

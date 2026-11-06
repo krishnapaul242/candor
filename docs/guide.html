@@ -25,6 +25,7 @@
 
   <ol class="toc">
     <li><a href="#files">Files, lines and blocks</a></li>
+    <li><a href="#modules">Modules</a></li>
     <li><a href="#types">Types</a></li>
     <li><a href="#bindings">let, var and constants</a></li>
     <li><a href="#control">Control flow</a></li>
@@ -45,6 +46,25 @@
   <h2 id="files">Files, lines and blocks</h2>
   <p>A <code>.cnd</code> file holds top-level <code>type</code>, <code>fn</code> and constant (<code>let</code>) declarations. One statement per line; a newline ends a statement, except inside brackets or after an operator or comma, so long expressions can wrap after <code>+</code> or <code>,</code>. Comments start with <code>#</code>.</p>
   <p>Every block ends with a <strong>labeled</strong> <code>end</code>: <code>end fn name</code>, <code>end type Name</code>, <code>end if</code>, <code>end while</code>, <code>end for</code>, <code>end match</code>. If the label doesn't match the open block, the error names the line where the block was opened.</p>
+
+  <h2 id="modules">Modules</h2>
+<pre><code class="cnd"># app.cnd
+use "lib/shapes.cnd"
+use "lib/geometry.cnd"
+
+fn main()
+  effects io
+  print(show(area(Square(2.0))))
+end fn main</code></pre>
+  <ul>
+    <li><code>use "path.cnd"</code> goes at top level. The path is relative to the file that contains the <code>use</code>. Each file is loaded once, even if it's reached by several paths, and cycles between files are fine.</li>
+    <li><strong>Names stay globally unique.</strong> There are no namespaces or qualified names, so every name means one thing across the whole program. A duplicate in another file is reported with the location of the first definition.</li>
+    <li><strong>Visibility is direct.</strong> A file can <em>name</em> a function, type, variant or constant only if it declares it itself or if a file it directly <code>use</code>s does. Using a value whose type comes from elsewhere, such as reading a field, needs no import. Every name you write can be traced to a <code>use</code> in the same file.</li>
+  </ul>
+<pre><code>error[not-imported] app.cnd:10:11
+  'deep_value' is defined in lib/deep.cnd, which this file does not use
+  hint: add 'use "lib/deep.cnd"' at the top of this file</code></pre>
+  <p>Diagnostics, hole reports and traps all name the real file: <code>trap in ratio at geometry.cnd:15: division by zero</code>.</p>
 
   <h2 id="types">Types</h2>
   <div class="table-wrap"><table>
@@ -244,15 +264,16 @@ end fn main</code></pre>
       <tr><td><code>parse_float(s)</code></td><td>Strict decimal parse. Traps on invalid input.</td></tr>
       <tr><td><code>args()</code>, <code>exit(code)</code></td><td>Program arguments and exit. Effect <code>io</code>.</td></tr>
       <tr><td><code>read_file(p)</code>, <code>write_file(p, s)</code></td><td>Whole-file I/O. Effect <code>fs</code>. Traps on failure.</td></tr>
+      <tr><td><code>file_exists(p)</code></td><td><code>true</code> if <code>p</code> is a regular file. Effect <code>fs</code>.</td></tr>
       <tr><td><code>clock_ms()</code></td><td>Wall-clock milliseconds. Effect <code>time</code>.</td></tr>
     </tbody>
   </table></div>
 
   <h2 id="traps">Traps</h2>
-  <p>Runtime errors stop the program with a message naming the function and line, and exit with code 1:</p>
-<pre><code>trap in fact at line 5: integer overflow
-trap in main at line 5: index 3 out of bounds for length 3
-trap in sqrt_int at line 3: ensures failed: result * result &lt;= n</code></pre>
+  <p>Runtime errors stop the program with a message naming the function, file and line, and exit with code 1:</p>
+<pre><code>trap in fact at fact.cnd:5: integer overflow
+trap in main at app.cnd:5: index 3 out of bounds for length 3
+trap in sqrt_int at math.cnd:3: ensures failed: result * result &lt;= n</code></pre>
   <p>Integer overflow, bad indexes, division by zero, failed contracts and assertions, <code>pop</code> on an empty array, out-of-range <code>to_int</code>, and reached holes all trap. Nothing wraps or truncates silently.</p>
 
   <h2 id="cli">The CLI</h2>

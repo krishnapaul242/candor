@@ -8,8 +8,8 @@ The full roadmap, with what "done" means for each milestone, is at **https://kri
 |---|---|---|
 | v0.1 Core language | done | effects, typed holes, contracts, labeled ends, trapping arithmetic, value semantics, JS and C backends |
 | v0.2 Self-hosting | done | `inout`, borrowed arguments, `candorc` bootstraps to a fixed point; enum `==`/`show`, constants, `pop` |
-| v0.3 Modules | **next** | `use "file.cnd"`; delete `selfhost/build.sh`; diagnostics cite real files |
-| v0.4 Distinct types | planned | `type TyId = distinct Int`, so ids can't be mixed up |
+| v0.3 Modules | done | `use "file.cnd"` with direct visibility; candorc is six modules; diagnostics and traps cite real files |
+| v0.4 Distinct types | **next** | `type TyId = distinct Int`, so ids can't be mixed up |
 | v0.5 Generics | planned | `Option[T]`, `Result[T, E]`, visible error propagation; remove the parser's `failed` flag |
 | v0.6 Memory | planned | reference counting and copy-on-write; binary-trees under 50 MB (453 MB today) |
 | v0.7 Typed AST | planned | per-category node types in `candorc`, exhaustive dispatch |

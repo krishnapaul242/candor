@@ -415,13 +415,18 @@ export function parse(src) {
     return { name: nt.value, ty, init, line: t.line, col: t.col };
   }
 
-  const program = { types: [], fns: [], consts: [] };
+  const program = { types: [], fns: [], consts: [], uses: [] };
   skipNl();
   while (!at('eof')) {
     if (atKw('fn')) program.fns.push(parseFn());
     else if (atKw('let') || atKw('var')) program.consts.push(parseConst());
     else if (atKw('type')) program.types.push(parseTypeDecl());
-    else fail(`expected 'fn', 'type' or 'let' at top level, found ${describe(peek())}`, 'statements must be inside a function');
+    else if (atKw('use')) {
+      const t = next();
+      if (!at('str')) fail(`expected a module path after 'use', e.g. use "lexer.cnd"`);
+      program.uses.push({ path: next().value, line: t.line, col: t.col });
+    }
+    else fail(`expected 'fn', 'type', 'let' or 'use' at top level, found ${describe(peek())}`, 'statements must be inside a function');
     endLine();
   }
   return program;

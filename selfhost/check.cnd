@@ -1,3 +1,6 @@
+use "util.cnd"
+use "parser.cnd"
+
 # ===================== checker =====================
 # Types are interned ids into Cx.tys; the prelude types have fixed ids (T_INT etc).
 
@@ -11,6 +14,7 @@ type Hole = record
   name: Str
   ty: Str
   fn_name: Str
+  file: Int
   line: Int
   col: Int
   scope: Str
@@ -18,7 +22,9 @@ end type Hole
 
 type Cx = record
   ast: Ast
-  src: Str
+  srcs: [Str]
+  files: [Str]
+  uses: [[Int]]
   tys: [Ty]
   diags: [Diag]
   holes: [Hole]
@@ -40,11 +46,12 @@ type Cx = record
   const_names: [Str]
   const_tys: [Int]
   const_lines: [Int]
+  const_decls: [Int]
 end type Cx
 
-fn new_cx(ast: Ast, src: Str) -> Cx
+fn new_cx(ast: Ast, srcs: [Str], files: [Str], uses: [[Int]]) -> Cx
   let tys = [Ty { k: YErr, name: "", el: -1 }, Ty { k: YInt, name: "", el: -1 }, Ty { k: YFloat, name: "", el: -1 }, Ty { k: YBool, name: "", el: -1 }, Ty { k: YStr, name: "", el: -1 }, Ty { k: YUnit, name: "", el: -1 }, Ty { k: YArr, name: "", el: 4 }]
-  return Cx { ast: ast, src: src, tys: tys, diags: [], holes: [], types: map_new(), variants: map_new(), fns: map_new(), fn_list: [], cur_fn: -1, effs: [], where: "body", loops: 0, sc_n: 0, sc_names: [], sc_tys: [], sc_kinds: [], sc_lines: [], sc_marks: [], const_nodes: [], const_names: [], const_tys: [], const_lines: [] }
+  return Cx { ast: ast, srcs: srcs, files: files, uses: uses, tys: tys, diags: [], holes: [], types: map_new(), variants: map_new(), fns: map_new(), fn_list: [], cur_fn: -1, effs: [], where: "body", loops: 0, sc_n: 0, sc_names: [], sc_tys: [], sc_kinds: [], sc_lines: [], sc_marks: [], const_nodes: [], const_names: [], const_tys: [], const_lines: [], const_decls: [] }
 end fn new_cx
 
 # ---------- types ----------
@@ -123,10 +130,35 @@ end fn needs_copy_any
 # ---------- diagnostics ----------
 
 fn err(inout cx: Cx, code: Str, n: Int, msg: Str, hint: Str)
+  let file = cx.ast.nodes[n].file
   let line = cx.ast.nodes[n].line
   let col = cx.ast.nodes[n].col
-  push(cx.diags, Diag { code: code, msg: msg, hint: hint, line: line, col: col })
+  push(cx.diags, Diag { code: code, msg: msg, hint: hint, file: file, line: line, col: col })
 end fn err
+
+# A file may only name what it declares or what a file it directly `use`s declares.
+fn check_visible(inout cx: Cx, at: Int, decl: Int, name: Str)
+  let from = cx.ast.nodes[at].file
+  let to = cx.ast.nodes[decl].file
+  if from == to then
+    return
+  end if
+  for u in cx.uses[from] do
+    if u == to then
+      return
+    end if
+  end for
+  let target = cx.files[to]
+  err(inout cx, "not-imported", at, "'" ++ name ++ "' is defined in " ++ target ++ ", which this file does not use", "add 'use \"" ++ rel_path(dir_name(cx.files[from]), target) ++ "\"' at the top of this file")
+end fn check_visible
+
+# " (first defined in other.cnd:12)" when a duplicate's original lives in another file
+fn elsewhere(cx: Cx, prev: Int, dup: Int) -> Str
+  if prev < 0 or cx.ast.nodes[prev].file == cx.ast.nodes[dup].file then
+    return ""
+  end if
+  return " (first defined in " ++ cx.files[cx.ast.nodes[prev].file] ++ ":" ++ show(cx.ast.nodes[prev].line) ++ ")"
+end fn elsewhere
 
 fn did_you_mean(s: Str, fallback: Str) -> Str
   if s != "" then
@@ -152,7 +184,7 @@ fn cnk(cx: Cx, n: Int) -> Int
 end fn cnk
 
 fn src_of(cx: Cx, n: Int) -> Str
-  return slice(cx.src, cx.ast.nodes[n].start, cx.ast.nodes[n].stop)
+  return slice(cx.srcs[cx.ast.nodes[n].file], cx.ast.nodes[n].start, cx.ast.nodes[n].stop)
 end fn src_of
 
 # ---------- scopes ----------
@@ -251,7 +283,7 @@ end fn declare_params
 # ---------- builtins ----------
 
 fn builtin_names() -> [Str]
-  return ["print", "show", "len", "push", "pop", "array", "to_float", "to_int", "sqrt", "assert", "clock_ms", "byte_at", "slice", "from_byte", "join", "parse_float", "eprint", "args", "exit", "read_file", "write_file"]
+  return ["print", "show", "len", "push", "pop", "array", "to_float", "to_int", "sqrt", "assert", "clock_ms", "byte_at", "slice", "from_byte", "join", "parse_float", "eprint", "args", "exit", "read_file", "write_file", "file_exists"]
 end fn builtin_names
 
 fn builtin_params(name: Str) -> [Int]
@@ -285,6 +317,9 @@ fn builtin_params(name: Str) -> [Int]
   if name == "write_file" then
     return [T_STR, T_STR]
   end if
+  if name == "file_exists" then
+    return [T_STR]
+  end if
   return []
 end fn builtin_params
 
@@ -301,6 +336,9 @@ fn builtin_ret(name: Str) -> Int
   if name == "args" then
     return T_STRS
   end if
+  if name == "file_exists" then
+    return T_BOOL
+  end if
   return T_STR
 end fn builtin_ret
 
@@ -308,7 +346,7 @@ fn builtin_effect(name: Str) -> Str
   if str_in(name, ["print", "eprint", "args", "exit"]) then
     return "io"
   end if
-  if name == "read_file" or name == "write_file" then
+  if name == "read_file" or name == "write_file" or name == "file_exists" then
     return "fs"
   end if
   if name == "clock_ms" then
@@ -465,7 +503,7 @@ fn check_inner(inout cx: Cx, e: Int, expected: Int) -> Int
       fname = "const " ++ nname(cx, cx.cur_fn)
     end if
     let tstr = ty_str(cx, expected)
-    push(cx.holes, Hole { name: hname, ty: tstr, fn_name: fname, line: line, col: col, scope: join(scope, ", ") })
+    push(cx.holes, Hole { name: hname, ty: tstr, fn_name: fname, file: cx.ast.nodes[e].file, line: line, col: col, scope: join(scope, ", ") })
     return expected
   end if
   if k == NIdent then
@@ -517,6 +555,13 @@ fn check_ident(inout cx: Cx, e: Int) -> Int
   let b = lookup(cx, name)
   if b >= 0 then
     cx.ast.nodes[e].bind = cx.sc_kinds[b]
+    if cx.sc_kinds[b] == BConst then
+      for ci in 0 ..< len(cx.const_names) do
+        if cx.const_names[ci] == name then
+          check_visible(inout cx, e, cx.const_decls[ci], name)
+        end if
+      end for
+    end if
     return cx.sc_tys[b]
   end if
   let v = map_get(cx.variants, name)
@@ -527,6 +572,7 @@ fn check_ident(inout cx: Cx, e: Int) -> Int
     end if
     cx.ast.nodes[e].ref = v
     cx.ast.nodes[e].what = RVariant
+    check_visible(inout cx, e, v, name)
     return cx.ast.nodes[v].ty
   end if
   for cn in cx.const_nodes do
@@ -589,6 +635,7 @@ fn check_rec(inout cx: Cx, e: Int) -> Int
     end for
     return T_ERR
   end if
+  check_visible(inout cx, e, decl, name)
   var given: [Str] = []
   for i in 0 ..< cnk(cx, e) do
     let fi = ckid(cx, e, i)
@@ -757,6 +804,7 @@ fn check_call(inout cx: Cx, e: Int, expected: Int) -> Int
   if v >= 0 then
     cx.ast.nodes[e].ref = v
     cx.ast.nodes[e].what = RVariant
+    check_visible(inout cx, e, v, name)
     if arity_ok(inout cx, e, cnk(cx, v)) then
       for i in 0 ..< n do
         let fd = ckid(cx, v, i)
@@ -802,6 +850,7 @@ fn check_call(inout cx: Cx, e: Int, expected: Int) -> Int
   end if
   cx.ast.nodes[e].ref = f
   cx.ast.nodes[e].what = RFn
+  check_visible(inout cx, e, f, name)
   if cx.where == "constant" then
     err(inout cx, "const-init", e, "constant " ++ nname(cx, cx.cur_fn) ++ " can't call fn " ++ name, "constant initializers may use literals, operators, other constants and pure built-ins")
   end if
@@ -1230,6 +1279,7 @@ fn check_match(inout cx: Cx, s: Int)
         err(inout cx, "unknown-variant", c, ename ++ " has no variant '" ++ cname ++ "'", did_you_mean(s2, "variants: " ++ join(record_fields(cx, decl), ", ")))
       else
         cx.ast.nodes[c].ref = v
+        check_visible(inout cx, c, v, cname)
         if str_in(cname, covered) then
           err(inout cx, "duplicate", c, "variant " ++ cname ++ " is matched twice", "")
         end if
@@ -1303,6 +1353,7 @@ fn resolve_type(inout cx: Cx, n: Int) -> Int
     err(inout cx, "unknown-type", n, "unknown type '" ++ name ++ "'", did_you_mean(suggest(name, cands), ""))
     return T_ERR
   end if
+  check_visible(inout cx, n, d, name)
   if nkind(cx, d) == NRecord then
     return intern(inout cx, YRec, name, -1)
   end if
@@ -1355,7 +1406,7 @@ fn check_program(inout cx: Cx, prog: Int)
     if dk == NRecord or dk == NEnum then
       let name = nname(cx, d)
       if map_has(cx.types, name) or str_in(name, ["Int", "Float", "Bool", "Str", "Unit"]) then
-        err(inout cx, "duplicate", d, "type '" ++ name ++ "' is already defined", "")
+        err(inout cx, "duplicate", d, "type '" ++ name ++ "' is already defined" ++ elsewhere(cx, map_get(cx.types, name), d), "")
       else
         map_set(inout cx.types, name, d)
       end if
@@ -1426,7 +1477,13 @@ fn check_const(inout cx: Cx, c: Int)
   let name = nname(cx, c)
   let dup = str_in(name, cx.const_names)
   if dup then
-    err(inout cx, "duplicate", c, "constant '" ++ name ++ "' is already defined", "")
+    var first = -1
+    for ci in 0 ..< len(cx.const_names) do
+      if cx.const_names[ci] == name then
+        first = cx.const_decls[ci]
+      end if
+    end for
+    err(inout cx, "duplicate", c, "constant '" ++ name ++ "' is already defined" ++ elsewhere(cx, first, c), "")
   else if map_has(cx.variants, name) then
     err(inout cx, "duplicate", c, "'" ++ name ++ "' is already an enum variant", "")
   end if
@@ -1446,6 +1503,7 @@ fn check_const(inout cx: Cx, c: Int)
     push(cx.const_names, name)
     push(cx.const_tys, t)
     push(cx.const_lines, cx.ast.nodes[c].line)
+    push(cx.const_decls, c)
   end if
 end fn check_const
 
@@ -1455,6 +1513,8 @@ fn check_signature(inout cx: Cx, f: Int)
     var sfx = ""
     if str_in(name, builtin_names()) then
       sfx = " (built-in)"
+    else
+      sfx = elsewhere(cx, map_get(cx.fns, name), f)
     end if
     err(inout cx, "duplicate", f, "function '" ++ name ++ "' is already defined" ++ sfx, "")
     return
@@ -1529,6 +1589,9 @@ fn check_fn_body(inout cx: Cx, f: Int)
 end fn check_fn_body
 
 fn diag_before(a: Diag, b: Diag) -> Bool
+  if a.file != b.file then
+    return a.file < b.file
+  end if
   return a.line < b.line or (a.line == b.line and a.col < b.col)
 end fn diag_before
 

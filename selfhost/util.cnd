@@ -189,6 +189,93 @@ fn ends_with(s: Str, suffix: Str) -> Bool
   return slice(s, len(s) - len(suffix), len(s)) == suffix
 end fn ends_with
 
+# ---------- paths (always '/'-separated) ----------
+
+fn split_on(s: Str, sep: Int) -> [Str]
+  var out: [Str] = []
+  var start = 0
+  for i in 0 ..< len(s) do
+    if byte_at(s, i) == sep then
+      push(out, slice(s, start, i))
+      start = i + 1
+    end if
+  end for
+  push(out, slice(s, start, len(s)))
+  return out
+end fn split_on
+
+fn norm_path(p: Str) -> Str
+  example norm_path("a/./b/../c.cnd") == "a/c.cnd"
+  example norm_path("../x/y.cnd") == "../x/y.cnd"
+  let abs = starts_with(p, "/")
+  var parts: [Str] = []
+  for seg in split_on(p, 47) do
+    if seg == "" or seg == "." then
+      continue
+    end if
+    if seg == ".." and len(parts) > 0 and parts[len(parts) - 1] != ".." then
+      let _ = pop(parts)
+    else if seg == ".." and abs then
+      continue
+    else
+      push(parts, seg)
+    end if
+  end for
+  if abs then
+    return "/" ++ join(parts, "/")
+  end if
+  return join(parts, "/")
+end fn norm_path
+
+fn dir_name(p: Str) -> Str
+  var i = len(p) - 1
+  while i >= 0 do
+    if byte_at(p, i) == 47 then
+      return slice(p, 0, i)
+    end if
+    i = i - 1
+  end while
+  return ""
+end fn dir_name
+
+fn base_name(p: Str) -> Str
+  let d = dir_name(p)
+  if d == "" and not starts_with(p, "/") then
+    return p
+  end if
+  return slice(p, len(d) + 1, len(p))
+end fn base_name
+
+fn join_path(dir: Str, p: Str) -> Str
+  if starts_with(p, "/") or dir == "" then
+    return norm_path(p)
+  end if
+  return norm_path(dir ++ "/" ++ p)
+end fn join_path
+
+# Path of `target` as written from a file in directory `from_dir`.
+fn rel_path(from_dir: Str, target: Str) -> Str
+  example rel_path("selfhost", "selfhost/lexer.cnd") == "lexer.cnd"
+  example rel_path("a/b", "a/c/d.cnd") == "../c/d.cnd"
+  var a: [Str] = []
+  if from_dir != "" then
+    a = split_on(from_dir, 47)
+  end if
+  let b = split_on(target, 47)
+  var i = 0
+  while i < len(a) and i < len(b) - 1 and a[i] == b[i] do
+    i = i + 1
+  end while
+  var out: [Str] = []
+  for j in i ..< len(a) do
+    push(out, "..")
+  end for
+  for k in i ..< len(b) do
+    push(out, b[k])
+  end for
+  return join(out, "/")
+end fn rel_path
+
 # ---------- hash map: Str -> Int (insertion-ordered keys) ----------
 
 type StrMap = record
@@ -270,12 +357,13 @@ type Diag = record
   code: Str
   msg: Str
   hint: Str
+  file: Int
   line: Int
   col: Int
 end type Diag
 
 fn no_diag() -> Diag
-  return Diag { code: "", msg: "", hint: "", line: 0, col: 0 }
+  return Diag { code: "", msg: "", hint: "", file: 0, line: 0, col: 0 }
 end fn no_diag
 
 fn edit_distance(a: Str, b: Str) -> Int

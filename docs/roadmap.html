@@ -42,16 +42,16 @@
     <p><code>inout</code> parameters marked at the call site, borrowed arguments with copy-on-escape, string, file and argument built-ins, and <code>candorc</code> (the compiler in Candor) reaching a bootstrap fixed point. Then the first fixes from the field notes: <code>==</code>/<code>show</code> on payload-free enums, top-level constants, and <code>pop</code>.</p>
   </div>
 
+  <div class="milestone">
+    <h3>v0.3: Modules <span class="badge done">done</span></h3>
+    <p><code>use "lexer.cnd"</code>, with each file checked as its own unit and diagnostics that name the real file and line. Names stay globally unique (no shadowing across modules), keeping "every name means one thing".</p>
+    <p class="muted"><strong>Done:</strong> <code>candorc</code> is six modules connected by <code>use</code>, <code>build.sh</code> is gone, and errors cite the real file (<code>selfhost/lexer.cnd:46:19</code>). Visibility is direct: deleting one <code>use</code> from <code>cgen.cnd</code> produces 165 <code>not-imported</code> errors, each naming the line to add. Traps name their file too.</p>
+  </div>
+
   <h2>Next</h2>
 
   <div class="milestone">
-    <h3>v0.3: Modules <span class="badge next">next</span></h3>
-    <p><code>use "lexer.cnd"</code>, with each file checked as its own unit and diagnostics that name the real file and line. Names stay globally unique (no shadowing across modules), keeping "every name means one thing".</p>
-    <p class="muted"><strong>Done when:</strong> <code>candorc</code> is split into real modules, <code>selfhost/build.sh</code> is deleted, and its errors cite <code>parser.cnd:120</code> instead of a line in a concatenated file.</p>
-  </div>
-
-  <div class="milestone">
-    <h3>v0.4: Distinct types</h3>
+    <h3>v0.4: Distinct types <span class="badge next">next</span></h3>
     <p><code>type TyId = distinct Int</code>: same representation, but not interchangeable with <code>Int</code> or with another distinct type. In <code>candorc</code> today, type ids and AST node ids are both <code>Int</code>, and mixing them up type-checks.</p>
     <p class="muted"><strong>Done when:</strong> <code>candorc</code> uses <code>TyId</code>, <code>NodeId</code> and <code>TokIdx</code>, and swapping any two is a compile error.</p>
   </div>

@@ -1,0 +1,16 @@
+use "shapes.cnd"
+
+fn area(s: Shape) -> Float
+  match s
+    case Square(a)
+      return a * a
+    case Circle(r)
+      return 3.0 * r * r
+    case Nothing
+      return 0.0
+  end match
+end fn area
+
+fn ratio(a: Int, b: Int) -> Int
+  return a / b
+end fn ratio

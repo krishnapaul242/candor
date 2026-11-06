@@ -2,6 +2,7 @@
 // evaluation order to left-to-right, matching the JS backend exactly.
 import fs from 'node:fs';
 import { mangle } from './check.js';
+import { basename } from './loader.js';
 
 const PRELUDE = fs.readFileSync(new URL('../runtime/candor_rt.h', import.meta.url), 'utf8');
 
@@ -70,7 +71,9 @@ export function genC(program, info) {
     }
     return `({ ${decls.join(' ')} ${build(names)}; })`;
   };
-  const L = (fn, e) => `"${fn}", ${e.line}`;
+  const L = (fn, e) => `${cStr(fn)[0]}, ${e.line}`;
+  // trap label: "fn at file.cnd" (the runtime appends ":line")
+  const label = (name, node) => `${name} at ${basename(info.files?.[node.file ?? 0]?.path ?? '?')}`;
 
   function expr(e, fn) {
     let s = exprInner(e, fn);
@@ -174,6 +177,7 @@ export function genC(program, info) {
             case 'args': return `cn_args()`;
             case 'exit': return `cn_exit(${ps[0].code})`;
             case 'read_file': return `cn_read_file(${ps[0].code}, ${L(fn, e)})`;
+            case 'file_exists': return `cn_file_exists(${ps[0].code})`;
             case 'write_file': return seq(ps, ([a, b]) => `cn_write_file(${a}, ${b}, ${L(fn, e)})`);
           }
         }
@@ -292,22 +296,22 @@ export function genC(program, info) {
     const hasContracts = f.requires.length || f.ensures.length;
     const bodyName = hasContracts ? `f_${f.name}__body` : `f_${f.name}`;
     protos.push(`static ${rt} ${bodyName}(${params});`);
-    const tail = f.sig.ret.k !== 'Unit' ? `  cn_trap("${f.name}", ${f.line}, "missing return");\n` : '';
-    bodies.push(`static ${rt} ${bodyName}(${params}) {\n${stmts(f.body, f.name, 1)}${tail}}`);
+    const tail = f.sig.ret.k !== 'Unit' ? `  cn_trap(${cStr(label(f.name, f))[0]}, ${f.line}, "missing return");\n` : '';
+    bodies.push(`static ${rt} ${bodyName}(${params}) {\n${stmts(f.body, label(f.name, f), 1)}${tail}}`);
     if (hasContracts) {
       protos.push(`static ${rt} f_${f.name}(${params});`);
       let w = `static ${rt} f_${f.name}(${params}) {\n`;
-      for (const r of f.requires) w += `  if (!(${expr(r, f.name)})) cn_trap(${L(f.name, r)}, "%s", ${cStr('requires failed: ' + r.src)[0]});\n`;
+      for (const r of f.requires) w += `  if (!(${expr(r, label(f.name, f))})) cn_trap(${L(label(f.name, f), r)}, "%s", ${cStr('requires failed: ' + r.src)[0]});\n`;
       if (rt === 'void') w += `  ${bodyName}(${args});\n`;
       else w += `  ${rt} v_result = ${bodyName}(${args});\n`;
-      for (const en of f.ensures) w += `  if (!(${expr(en, f.name)})) cn_trap(${L(f.name, en)}, "%s", ${cStr('ensures failed: ' + en.src)[0]});\n`;
+      for (const en of f.ensures) w += `  if (!(${expr(en, label(f.name, f))})) cn_trap(${L(label(f.name, f), en)}, "%s", ${cStr('ensures failed: ' + en.src)[0]});\n`;
       if (rt !== 'void') w += `  return v_result;\n`;
       bodies.push(w + '}');
     }
   }
   const consts = program.consts ?? [];
   const globals = consts.map((c) => `static ${ctype(c.t)} g_${c.name};`);
-  const init = `static void cn_init(void) {\n${consts.map((c) => `  g_${c.name} = ${expr(c.init, c.name)};\n`).join('')}}`;
+  const init = `static void cn_init(void) {\n${consts.map((c) => `  g_${c.name} = ${expr(c.init, label(c.name, c))};\n`).join('')}}`;
   const copyList = [...copyDefs.values()];
   return [
     ...head,

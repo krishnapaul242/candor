@@ -1,3 +1,6 @@
+use "util.cnd"
+use "lexer.cnd"
+
 # ===================== AST + parser =====================
 # The AST is an arena: nodes live in one array and refer to children by index
 # through a shared `kids` array. Checker annotations are written into the nodes.
@@ -22,6 +25,7 @@ type Node = record
   copy: Bool     # checker: copy this whole read of a var place
   copy_in: Bool  # checker: copy because the value escapes
   exh: Bool      # checker: match is exhaustive
+  file: Int      # which source file this node came from
 end type Node
 
 type Ast = record
@@ -73,6 +77,10 @@ type P = record
   ast: Ast
   failed: Bool
   err: Diag
+  file: Int
+  uses: [Str]
+  use_lines: [Int]
+  use_cols: [Int]
 end type P
 
 # ---------- token helpers ----------
@@ -121,7 +129,7 @@ end fn describe
 fn fail_at(inout p: P, code: Str, line: Int, col: Int, msg: Str, hint: Str)
   if not p.failed then
     p.failed = true
-    p.err = Diag { code: code, msg: msg, hint: hint, line: line, col: col }
+    p.err = Diag { code: code, msg: msg, hint: hint, file: p.file, line: line, col: col }
   end if
 end fn fail_at
 
@@ -211,7 +219,7 @@ fn mk(inout p: P, kind: NodeKind, line: Int, col: Int, start: Int, ks: [Int]) ->
   if p.pos > 0 then
     stop = p.toks[p.pos - 1].stop
   end if
-  push(p.ast.nodes, Node { kind: kind, line: line, col: col, start: start, stop: stop, name: "", ival: 0, fval: 0.0, sval: "", flag: false, k0: k0, nk: len(ks), ty: 0, bind: BNone, ref: -1, what: RNone, copy: false, copy_in: false, exh: false })
+  push(p.ast.nodes, Node { kind: kind, line: line, col: col, start: start, stop: stop, name: "", ival: 0, fval: 0.0, sval: "", flag: false, k0: k0, nk: len(ks), ty: 0, bind: BNone, ref: -1, what: RNone, copy: false, copy_in: false, exh: false, file: p.file })
   return len(p.ast.nodes) - 1
 end fn mk
 
@@ -854,8 +862,19 @@ fn parse_const(inout p: P) -> Int
   return n
 end fn parse_const
 
-fn parse_program(src: Str, toks: [Tok]) -> P
-  var p = P { toks: toks, pos: 0, src: src, ast: Ast { nodes: [], kids: [] }, failed: false, err: no_diag() }
+# The combined program: every file's declarations, dependencies first.
+fn add_program(inout a: Ast, decls: [Int]) -> Int
+  let k0 = len(a.kids)
+  for d in decls do
+    push(a.kids, d)
+  end for
+  push(a.nodes, Node { kind: NProgram, line: 1, col: 1, start: 0, stop: 0, name: "", ival: 0, fval: 0.0, sval: "", flag: false, k0: k0, nk: len(decls), ty: 0, bind: BNone, ref: -1, what: RNone, copy: false, copy_in: false, exh: false, file: 0 })
+  return len(a.nodes) - 1
+end fn add_program
+
+# Parse one file into the shared arena `ast`; the last node is this file's program node.
+fn parse_program(src: Str, toks: [Tok], file: Int, ast: Ast) -> P
+  var p = P { toks: toks, pos: 0, src: src, ast: ast, failed: false, err: no_diag(), file: file, uses: [], use_lines: [], use_cols: [] }
   skip_nl(inout p)
   var decls: [Int] = []
   while not p.failed and not at_kind(p, TEof) do
@@ -865,8 +884,18 @@ fn parse_program(src: Str, toks: [Tok]) -> P
       push(decls, parse_type_decl(inout p))
     else if at_kw(p, "let") or at_kw(p, "var") then
       push(decls, parse_const(inout p))
+    else if at_kw(p, "use") then
+      let ut = next_tok(inout p)
+      if not at_kind(p, TStr) then
+        fail(inout p, "expected a module path after 'use', e.g. use \"lexer.cnd\"", "")
+      else
+        push(p.uses, ttext(p))
+        push(p.use_lines, p.toks[ut].line)
+        push(p.use_cols, p.toks[ut].col)
+        let _ = next_tok(inout p)
+      end if
     else
-      fail(inout p, "expected 'fn', 'type' or 'let' at top level, found " ++ found(p), "statements must be inside a function")
+      fail(inout p, "expected 'fn', 'type', 'let' or 'use' at top level, found " ++ found(p), "statements must be inside a function")
     end if
     end_line(inout p)
   end while

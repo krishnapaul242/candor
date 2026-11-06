@@ -1,0 +1,13 @@
+use "lib/shapes.cnd"
+use "lib/geometry.cnd"
+use "lib/text.cnd"
+use "lib/ping.cnd"
+
+fn main()
+  effects io
+  for s in [Square(2.0), Circle(UNIT), Nothing] do
+    print(describe(s))
+  end for
+  print("ping " ++ show(ping(5)))
+  print(show(ratio(10, 0)))
+end fn main

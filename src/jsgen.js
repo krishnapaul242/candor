@@ -1,6 +1,7 @@
 // Candor -> JavaScript. Used by `candor run` and `candor test`: no build step,
 // V8 JIT-compiles the result. Semantics must match the C backend exactly.
 import { mangle } from './check.js';
+import { basename } from './loader.js';
 
 // Candor Str values are byte strings: each JS char holds one UTF-8 byte (0-255),
 // so len/byte_at/slice agree with the C backend.
@@ -10,7 +11,7 @@ const PRELUDE = String.raw`
 "use strict";
 const $MAXI = 9007199254740991;
 class $Trap extends Error {}
-function $trap(msg, fn, line) { throw new $Trap("trap in " + fn + " at line " + line + ": " + msg); }
+function $trap(msg, fn, line) { throw new $Trap("trap in " + fn + ":" + line + ": " + msg); }
 function $ovf(r, fn, line) { if (r > $MAXI || r < -$MAXI) $trap("integer overflow", fn, line); return r; }
 function $div(a, b, fn, line) {
   if (b === 0) $trap("division by zero", fn, line);
@@ -88,6 +89,8 @@ function $pop(a, fn, line) { if (a.length === 0) $trap("pop from empty array", f
 `;
 
 export function genJS(program, info, { examples = false } = {}) {
+  // trap label: "fn at file.cnd" (the runtime appends ":line")
+  const label = (name, node) => `${name} at ${basename(info.files?.[node.file ?? 0]?.path ?? '?')}`;
   const out = [PRELUDE];
   const copyFns = new Map();
   let tmp = 0;
@@ -195,6 +198,7 @@ export function genJS(program, info, { examples = false } = {}) {
             case 'args': return `$io.args.slice()`;
             case 'exit': return `$exit(${a[0]})`;
             case 'read_file': return `$read_file(${a[0]}, ${L(e, fn)})`;
+            case 'file_exists': return `$io.exists(${a[0]})`;
             case 'write_file': return `$write_file(${a[0]}, ${a[1]}, ${L(e, fn)})`;
             case 'push': return `(${a[0]}).push(${a[1]})`;
             case 'pop': {
@@ -281,19 +285,19 @@ export function genJS(program, info, { examples = false } = {}) {
     const params = f.params.map((p) => `${p.inout ? 'p' : 'v'}_${p.name}`).join(', ');
     const hasContracts = f.requires.length || f.ensures.length;
     const bodyName = hasContracts ? `f_${f.name}$body` : `f_${f.name}`;
-    out.push(`function ${bodyName}(${params}) {\n${stmts(f.body, f.name, 1)}${f.sig.ret.k !== 'Unit' ? `  $trap("missing return", ${JSON.stringify(f.name)}, ${f.line});\n` : ''}}`);
+    out.push(`function ${bodyName}(${params}) {\n${stmts(f.body, label(f.name, f), 1)}${f.sig.ret.k !== 'Unit' ? `  $trap("missing return", ${JSON.stringify(label(f.name, f))}, ${f.line});\n` : ''}}`);
     if (hasContracts) {
       let w = `function f_${f.name}(${params}) {\n`;
-      for (const r of f.requires) w += `  if (!(${expr(r, f.name)})) $trap(${bin('requires failed: ' + r.src)}, ${L(r, f.name)});\n`;
+      for (const r of f.requires) w += `  if (!(${expr(r, label(f.name, f))})) $trap(${bin('requires failed: ' + r.src)}, ${L(r, label(f.name, f))});\n`;
       w += `  const v_result = ${bodyName}(${params});\n`;
-      for (const en of f.ensures) w += `  if (!(${expr(en, f.name)})) $trap(${bin('ensures failed: ' + en.src)}, ${L(en, f.name)});\n`;
+      for (const en of f.ensures) w += `  if (!(${expr(en, label(f.name, f))})) $trap(${bin('ensures failed: ' + en.src)}, ${L(en, label(f.name, f))});\n`;
       out.push(w + `  return v_result;\n}`);
     }
   }
 
   const consts = program.consts ?? [];
   out.push(consts.map((c) => `let g_${c.name};`).join('\n'));
-  out.push(`function $init() {\n${consts.map((c) => `  g_${c.name} = ${expr(c.init, c.name)};\n`).join('')}}`);
+  out.push(`function $init() {\n${consts.map((c) => `  g_${c.name} = ${expr(c.init, label(c.name, c))};\n`).join('')}}`);
 
   if (examples) {
     const list = [];
@@ -302,8 +306,8 @@ export function genJS(program, info, { examples = false } = {}) {
         const where = JSON.stringify(f.name);
         const isEq = ex.e === 'bin' && ex.op === '==';
         const run = isEq
-          ? `() => { const l = ${expr(ex.l, f.name)}; const r = ${expr(ex.r, f.name)}; return { ok: l === r, l: $display(l), r: $display(r) }; }`
-          : `() => ({ ok: ${expr(ex, f.name)} })`;
+          ? `() => { const l = ${expr(ex.l, label(f.name, f))}; const r = ${expr(ex.r, label(f.name, f))}; return { ok: l === r, l: $display(l), r: $display(r) }; }`
+          : `() => ({ ok: ${expr(ex, label(f.name, f))} })`;
         list.push(`{ fn: ${where}, line: ${ex.line}, src: ${JSON.stringify(ex.src)}, run: ${run} }`);
       }
     }

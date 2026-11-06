@@ -36,6 +36,7 @@ const BUILTINS = {
   exit: { params: [Int], ret: Unit, effects: ['io'] },
   read_file: { params: [Str], ret: Str, effects: ['fs'] },
   write_file: { params: [Str, Str], ret: Unit, effects: ['fs'] },
+  file_exists: { params: [Str], ret: Bool, effects: ['fs'] },
 };
 
 function editDistance(a, b) {
@@ -55,7 +56,10 @@ function suggest(name, candidates) {
   return best && bd <= Math.max(1, Math.floor(name.length / 3)) ? best : null;
 }
 
-export function check(program) {
+import { dirname, relPath } from './loader.js';
+
+// mod: { files: [{path}], uses: [[fileId]] } from the loader (single file if omitted)
+export function check(program, mod = { files: [{ path: '' }], uses: [[]] }) {
   const diags = [];
   const holes = [];
   const types = new Map();     // name -> decl (with resolved field types)
@@ -63,11 +67,22 @@ export function check(program) {
   const fns = new Map();       // name -> decl (with .sig)
 
   const err = (code, node, message, hint) =>
-    diags.push({ severity: 'error', code, message, hint, line: node.line, col: node.col });
+    diags.push({ severity: 'error', code, message, hint, file: node.file ?? 0, line: node.line, col: node.col });
+  // A file may only name what it declares or what a file it directly `use`s declares.
+  const fileOf = (n) => n.file ?? 0;
+  // " (first defined in other.cnd:12)" when a duplicate's original lives in another file
+  const elsewhere = (prev, dup) => prev && fileOf(prev) !== fileOf(dup) ? ` (first defined in ${mod.files[fileOf(prev)].path}:${prev.line})` : '';
+  const checkVisible = (at, decl, name) => {
+    const from = fileOf(at), to = fileOf(decl);
+    if (from === to || mod.uses[from].includes(to)) return;
+    const target = mod.files[to].path;
+    err('not-imported', at, `'${name}' is defined in ${target}, which this file does not use`,
+      `add 'use "${relPath(dirname(mod.files[from].path), target)}"' at the top of this file`);
+  };
 
   // ---- types ----
   for (const td of program.types) {
-    if (types.has(td.name) || PRIMS[td.name]) { err('duplicate', td, `type '${td.name}' is already defined`); continue; }
+    if (types.has(td.name) || PRIMS[td.name]) { err('duplicate', td, `type '${td.name}' is already defined${elsewhere(types.get(td.name), td)}`); continue; }
     types.set(td.name, td);
   }
   const resolveType = (te) => {
@@ -79,6 +94,7 @@ export function check(program) {
       err('unknown-type', te, `unknown type '${te.name}'`, s ? `did you mean '${s}'?` : undefined);
       return ERR;
     }
+    checkVisible(te, td, te.name);
     return { k: td.kind === 'record' ? 'Rec' : 'Enum', name: td.name };
   };
   for (const td of types.values()) {
@@ -124,7 +140,7 @@ export function check(program) {
   // ---- function signatures ----
   for (const fn of program.fns) {
     if (fns.has(fn.name) || BUILTINS[fn.name]) {
-      err('duplicate', fn, `function '${fn.name}' is already defined${BUILTINS[fn.name] ? ' (built-in)' : ''}`);
+      err('duplicate', fn, `function '${fn.name}' is already defined${BUILTINS[fn.name] ? ' (built-in)' : elsewhere(fns.get(fn.name), fn)}`);
       continue;
     }
     if (variants.has(fn.name)) err('duplicate', fn, `'${fn.name}' is already an enum variant`);
@@ -243,14 +259,18 @@ export function check(program) {
           return ERR;
         }
         holes.push({
-          name: e.name, type: tyStr(expected), fn: `${ctx.where === 'constant' ? 'const' : 'fn'} ${ctx.fn.name}`, line: e.line, col: e.col,
+          name: e.name, file: e.file ?? 0, type: tyStr(expected), fn: `${ctx.where === 'constant' ? 'const' : 'fn'} ${ctx.fn.name}`, line: e.line, col: e.col,
           scope: [...ctx.visible()].map(([n, b]) => ({ name: n, type: tyStr(b.t), kind: b.kind })),
         });
         return expected;
       }
       case 'ident': {
         const b = ctx.lookup(e.name);
-        if (b) { e.binding = b; return b.t; }
+        if (b) {
+          e.binding = b;
+          if (b.kind === 'const') checkVisible(e, b.decl, e.name);
+          return b.t;
+        }
         const v = variants.get(e.name);
         if (v) {
           if (v.fields.length) {
@@ -258,6 +278,7 @@ export function check(program) {
             return ERR;
           }
           e.variant = v;
+          checkVisible(e, v.decl, e.name);
           return { k: 'Enum', name: v.enumName };
         }
         const later = program.consts.find((c) => c.name === e.name);
@@ -279,6 +300,7 @@ export function check(program) {
           for (const f of e.fields) checkExpr(f.value, ctx);
           return ERR;
         }
+        checkVisible(e, td, td.name);
         const given = new Set();
         for (const f of e.fields) {
           const fd = td.fields.find((x) => x.name === f.name);
@@ -399,6 +421,7 @@ export function check(program) {
     const v = variants.get(e.name);
     if (v) {
       e.variant = v;
+      checkVisible(e, v.decl, e.name);
       if (arity(v.fields.length)) v.fields.forEach((f, i) => { expect(e.args[i], ctx, f.t, `${e.name}.${f.name}`); escape(e.args[i]); });
       else e.args.forEach((a) => checkExpr(a, ctx));
       return { k: 'Enum', name: v.enumName };
@@ -462,6 +485,7 @@ export function check(program) {
       return ERR;
     }
     e.fn = fn;
+    checkVisible(e, fn, fn.name);
     if (ctx.where === 'constant') {
       err('const-init', e, `constant ${ctx.fn.name} can't call fn ${fn.name}`, 'constant initializers may use literals, operators, other constants and pure built-ins');
     }
@@ -599,6 +623,7 @@ export function check(program) {
               err('unknown-variant', c, `${t.name} has no variant '${c.pat.name}'`, s2 ? `did you mean '${s2}'?` : `variants: ${td.variants.map((x) => x.name).join(', ')}`);
             } else {
               c.variant = v;
+              checkVisible(c, v.decl, v.name);
               if (covered.has(v.name)) err('duplicate', c, `variant ${v.name} is matched twice`);
               covered.add(v.name);
               if (c.pat.binds.length !== v.fields.length) {
@@ -635,13 +660,13 @@ export function check(program) {
   }
 
   for (const c of program.consts) {
-    if (consts.has(c.name)) err('duplicate', c, `constant '${c.name}' is already defined`);
+    if (consts.has(c.name)) err('duplicate', c, `constant '${c.name}' is already defined${elsewhere(consts.get(c.name).decl, c)}`);
     else if (variants.has(c.name)) err('duplicate', c, `'${c.name}' is already an enum variant`);
     c.t = resolveType(c.ty);
     if (c.t.k === 'Unit') err('unit-value', c, 'constants cannot have type Unit');
     const ctx = new Ctx({ name: c.name, line: c.line }, new Set(), 'constant');
     if (c.t.k !== 'Err') expect(c.init, ctx, c.t, `value of '${c.name}'`); else checkExpr(c.init, ctx);
-    if (!consts.has(c.name)) consts.set(c.name, { t: c.t, kind: 'const', line: c.line });
+    if (!consts.has(c.name)) consts.set(c.name, { t: c.t, kind: 'const', line: c.line, decl: c });
   }
 
   for (const fn of program.fns) {
@@ -667,6 +692,6 @@ export function check(program) {
     }
   }
 
-  diags.sort((a, b) => a.line - b.line || a.col - b.col);
+  diags.sort((a, b) => a.file - b.file || a.line - b.line || a.col - b.col);
   return { diags, holes, types, variants, fns };
 }

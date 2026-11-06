@@ -1,0 +1,4 @@
+use "sub/broken.cnd"
+
+fn main()
+end fn main

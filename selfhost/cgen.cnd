@@ -1,3 +1,7 @@
+use "util.cnd"
+use "parser.cnd"
+use "check.cnd"
+
 # ===================== C generator =====================
 # Mirrors src/cgen.js. Output #includes runtime/candor_rt.h.
 # GNU statement expressions pin evaluation order to left-to-right.
@@ -134,8 +138,9 @@ fn c_str(s: Str) -> Str
   return join(parts, "")
 end fn c_str
 
+# fname is a trap label like "parse at parser.cnd"; the runtime appends ":line"
 fn loc(cx: Cx, fname: Str, e: Int) -> Str
-  return "\"" ++ fname ++ "\", " ++ show(cx.ast.nodes[e].line)
+  return c_str(fname) ++ ", " ++ show(cx.ast.nodes[e].line)
 end fn loc
 
 fn copies(cx: Cx, e: Int) -> Bool
@@ -497,6 +502,9 @@ fn gx_builtin(inout g: G, cx: Cx, e: Int, fname: Str) -> Str
   if name == "exit" then
     return "cn_exit(" ++ codes[0] ++ ")"
   end if
+  if name == "file_exists" then
+    return "cn_file_exists(" ++ codes[0] ++ ")"
+  end if
   if name == "read_file" then
     return "cn_read_file(" ++ codes[0] ++ ", " ++ loc(cx, fname, e) ++ ")"
   end if
@@ -759,7 +767,7 @@ fn gen_program(cx: Cx) -> Str
   var inits: [Str] = []
   for c in cx.const_nodes do
     push(globals, "static " ++ ctype(cx, cx.ast.nodes[c].ty) ++ " g_" ++ nname(cx, c) ++ ";")
-    push(inits, "  g_" ++ nname(cx, c) ++ " = " ++ gx(inout g, cx, ckid(cx, c, 1), nname(cx, c)) ++ ";\n")
+    push(inits, "  g_" ++ nname(cx, c) ++ " = " ++ gx(inout g, cx, ckid(cx, c, 1), trap_label(cx, c)) ++ ";\n")
   end for
   var out = head
   for cp in g.copy_protos do
@@ -782,8 +790,13 @@ fn gen_program(cx: Cx) -> Str
   return join(out, "\n") ++ "\n"
 end fn gen_program
 
+fn trap_label(cx: Cx, n: Int) -> Str
+  return nname(cx, n) ++ " at " ++ base_name(cx.files[cx.ast.nodes[n].file])
+end fn trap_label
+
 fn gen_fn(inout g: G, cx: Cx, f: Int, inout protos: [Str], inout bodies: [Str])
   let name = nname(cx, f)
+  let lab = trap_label(cx, f)
   let rt = ctype(cx, cx.ast.nodes[f].ty)
   let ps = fn_params(cx.ast, f)
   var params: [Str] = []
@@ -813,16 +826,16 @@ fn gen_fn(inout g: G, cx: Cx, f: Int, inout protos: [Str], inout bodies: [Str])
   push(protos, "static " ++ rt ++ " " ++ body_name ++ "(" ++ plist ++ ");")
   var tail = ""
   if cx.ast.nodes[f].ty != T_UNIT then
-    tail = "  cn_trap(\"" ++ name ++ "\", " ++ show(cx.ast.nodes[f].line) ++ ", \"missing return\");\n"
+    tail = "  cn_trap(" ++ c_str(lab) ++ ", " ++ show(cx.ast.nodes[f].line) ++ ", \"missing return\");\n"
   end if
-  let body = gen_block(inout g, cx, fn_body(cx.ast, f), name, 1)
+  let body = gen_block(inout g, cx, fn_body(cx.ast, f), lab, 1)
   push(bodies, "static " ++ rt ++ " " ++ body_name ++ "(" ++ plist ++ ") {\n" ++ body ++ tail ++ "}")
   if contracts then
     push(protos, "static " ++ rt ++ " f_" ++ name ++ "(" ++ plist ++ ");")
     var w = ["static " ++ rt ++ " f_" ++ name ++ "(" ++ plist ++ ") {\n"]
     for i2 in 0 ..< cnk(cx, rq) do
       let r = ckid(cx, rq, i2)
-      push(w, "  if (!(" ++ gx(inout g, cx, r, name) ++ ")) cn_trap(" ++ loc(cx, name, r) ++ ", \"%s\", " ++ c_str("requires failed: " ++ src_of(cx, r)) ++ ");\n")
+      push(w, "  if (!(" ++ gx(inout g, cx, r, lab) ++ ")) cn_trap(" ++ loc(cx, lab, r) ++ ", \"%s\", " ++ c_str("requires failed: " ++ src_of(cx, r)) ++ ");\n")
     end for
     if rt == "void" then
       push(w, "  " ++ body_name ++ "(" ++ join(argnames, ", ") ++ ");\n")
@@ -831,7 +844,7 @@ fn gen_fn(inout g: G, cx: Cx, f: Int, inout protos: [Str], inout bodies: [Str])
     end if
     for i3 in 0 ..< cnk(cx, es) do
       let en = ckid(cx, es, i3)
-      push(w, "  if (!(" ++ gx(inout g, cx, en, name) ++ ")) cn_trap(" ++ loc(cx, name, en) ++ ", \"%s\", " ++ c_str("ensures failed: " ++ src_of(cx, en)) ++ ");\n")
+      push(w, "  if (!(" ++ gx(inout g, cx, en, lab) ++ ")) cn_trap(" ++ loc(cx, lab, en) ++ ", \"%s\", " ++ c_str("ensures failed: " ++ src_of(cx, en)) ++ ");\n")
     end for
     if rt != "void" then
       push(w, "  return v_result;\n")

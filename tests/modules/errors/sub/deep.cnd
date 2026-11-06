@@ -1,0 +1,9 @@
+fn deep_value() -> Int
+  return 42
+end fn deep_value
+
+type Hidden = record
+  x: Int
+end type Hidden
+
+let SECRET: Int = 7

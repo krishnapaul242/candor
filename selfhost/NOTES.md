@@ -56,4 +56,12 @@ Both compilers implement the change, there are run and error tests for each new 
 
 **What remains magic:** the type ids themselves are still `Int`s, so `T_INT` and an AST node index are interchangeable to the checker. A distinct type for ids (`type TyId = Int`, not interchangeable with `Int`) would close that gap cheaply.
 
+## Update: modules (v0.3)
+
+**Language change:** `use "path.cnd"`, with direct visibility. Names stay globally unique, but a file can only *name* what it declares or what a file it directly `use`s declares, and the `not-imported` error gives the `use` line to add. Diagnostics, hole reports and traps now name the real file (`trap in ratio at geometry.cnd:15: ...`). One new builtin, `file_exists`, lets candorc report a missing module instead of crashing on `read_file`.
+
+**In candorc:** the six `NN_*.cnd` sections became real modules (`util`, `lexer`, `parser`, `check`, `cgen`, `candorc`), and `build.sh` is deleted. I wrote each file's `use` lines by guessing from the old layering, and they were all right the first time: the sections were already layered cleanly, so the split was mechanical. To confirm the rule actually bites, I deleted `use "check.cnd"` from `cgen.cnd`, which produced 165 `not-imported` errors.
+
+**New pain point, measured:** the loader parses each module into a shared AST arena. Getting that arena into the parser state and back out again copies it, because Candor can't *move* a value. Peak memory for a self-compile went from 36 MB to 54 MB. Copy-on-write (v0.6) would make this free. A cheaper stopgap would be letting `inout` reach into the parser, so the arena is never handed over at all.
+
 Each change goes into both compilers. The self-hosting test guarantees they stay in agreement, so the language can now evolve using itself.
